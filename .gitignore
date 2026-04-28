@@ -1,0 +1,50 @@
+# ── Entorno Python ──────────────────────────────────────────────────────────
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# ── Datos — ignorar contenido, preservar estructura con .gitkeep ─────────────
+data/raw/*
+!data/raw/.gitkeep
+data/interim/*
+!data/interim/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+
+# ── Modelos entrenados ───────────────────────────────────────────────────────
+models/*
+!models/.gitkeep
+
+# ── Resultados y logs ────────────────────────────────────────────────────────
+results/*
+!results/.gitkeep
+logs/*
+!logs/.gitkeep
+
+# ── Variables de entorno (secretos) ─────────────────────────────────────────
+.env
+*.env
+
+# ── MLflow local ────────────────────────────────────────────────────────────
+mlruns/
+mlartifacts/
+
+# ── Jupyter checkpoints ──────────────────────────────────────────────────────
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/
+
+# ── IDE y OS ─────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.DS_Store
+Thumbs.db
+
+# ── Kaggle credentials (nunca versionar) ─────────────────────────────────────
+kaggle.json
