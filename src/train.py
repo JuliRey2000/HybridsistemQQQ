@@ -118,7 +118,7 @@ class Trainer:
 
         # Scheduler: reduce LR si la validación no mejora en 5 épocas
         self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-            self.optimizer, mode="min", patience=5, factor=0.5, verbose=False
+            self.optimizer, mode="min", patience=5, factor=0.5
         )
 
         self.history: dict[str, list] = {
