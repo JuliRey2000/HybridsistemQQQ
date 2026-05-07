@@ -8,7 +8,7 @@
 
 ---
 
-## Última Corrida — 2026-05-07
+## Última Corrida — 2026-05-07 (actualización 2)
 
 **Notebook:** `QQQ_Hibrido_Completo.ipynb` | **Entorno:** Google Colab T4 | **FinBERT:** ceros (sin corpus)
 
@@ -31,6 +31,17 @@
 - Parámetros del modelo: 354,530
 - Test set: 365 muestras (último 15% del periodo 2015-2024)
 - Optimización VRAM aplicada: dataset GAN pre-cargado en GPU, sin transferencias CPU→GPU en training loop
+
+**Cambios en notebooks (2026-05-07, sesión 2):**
+
+`QQQ_Prototipo_Colab.ipynb`:
+- **Sección 6 agregada** — Análisis de Exposición al Mercado. Introduce zona de confianza adaptativa (`CONFIDENCE_MARGIN = percentil 50 de |prob − 0.5|`) que opera el 50% de días más seguros, dejando el resto en cash. Genera tabla comparativa LSTM vs Buy & Hold (exposición, win rate, Sharpe, MaxDD, retorno) y figura de 3 paneles (`exposicion_lstm_vs_bh.png`).
+- **Bug MLflow resuelto** — `cell-23` tenía `mlflow.start_run()` sin guard; al re-ejecutar o tras `cell-24` (duplicado) explotaba con "run already active". Fix: `if mlflow.active_run(): mlflow.end_run()` antes de `start_run`. `cell-24` (entrenamiento duplicado sin MLflow) eliminada.
+- **Diagnóstico de sesgo alcista** — El clasificador (`LSTMDirectionModel`) produce `preds_prob ∈ [0.521, 0.528]` siempre > 0.5. Causa: QQQ tiene drift positivo histórico + `pos_weight` en `BCEWithLogitsLoss`. La estrategia resultante es de **timing largo puro** (0 posiciones cortas), no long/short. El diagnóstico lo detecta automáticamente e imprime advertencia.
+- **Resultado con exposición 50%:** 9.1% retorno vs 35.0% B&H, MaxDD −16.2% vs −23.4%, win rate 57.4% vs 58.3%. Narrativa válida para presentación: misma tasa de acierto con la mitad del tiempo en riesgo y 7 pp menos de drawdown.
+
+`QQQ_Hibrido_Completo.ipynb`:
+- **Diagnóstico de exposición agregado al `cell-backtest`** — El modelo híbrido es un **regresor continuo** (predice retorno % directo), por lo que NO tiene el sesgo alcista del clasificador: sí genera señales cortas. El problema compartido es `THRESHOLD=0.0` que elimina la zona cash. La celda ahora imprime: rango de `preds_t1`, % de predicciones positivas/negativas, y una tabla de sensibilidad que muestra cuántos días quedarían activos para `THRESHOLD ∈ {0.1, 0.2, 0.3, 0.5}%`. Permite elegir el umbral con criterio antes de la presentación.
 
 ---
 
@@ -130,7 +141,10 @@ Cubierta en `QQQ_Hibrido_Completo.ipynb` Sección 5:
 - [x] Estrategia long/short con umbral configurable
 - [x] Sharpe, Sortino, MaxDD, número de trades
 - [x] Comparación vs Buy & Hold
-- [ ] Análisis de umbral óptimo (sensitivity analysis)
+- [x] Diagnóstico de exposición al mercado y tabla de sensibilidad de THRESHOLD (`QQQ_Hibrido_Completo.ipynb`)
+- [x] Análisis de exposición con zona de confianza adaptativa (`QQQ_Prototipo_Colab.ipynb` — Sección 6)
+- [x] Diagnóstico de sesgo alcista en clasificador (detectado y documentado)
+- [ ] Elegir THRESHOLD óptimo para `QQQ_Hibrido_Completo` basado en tabla de sensibilidad
 - [ ] Robustez a diferentes regímenes de mercado (alcista 2017-2019, caída 2022)
 
 ---
@@ -182,6 +196,9 @@ Cubierta en `QQQ_Hibrido_Completo.ipynb` Sección 6:
 | Mercados volátiles | ✅ Huber Loss en lugar de MSE |
 | GAN inestabilidad | ✅ WGAN-GP (Gradient Penalty) en lugar de weight clipping |
 | Loop infinito en `GANTrainer.train_epoch` | ✅ Batches materializados como lista + índice explícito (2026-05-07) |
+| MLflow "run already active" en notebook póster | ✅ Guard `if mlflow.active_run(): mlflow.end_run()` en `cell-23`; `cell-24` duplicada eliminada (2026-05-07) |
+| Exposición 0% en análisis de exposición del póster | ✅ `CONFIDENCE_MARGIN` hardcodeado a 0.10 superaba el rango real de probs [0.521–0.528]; ahora adaptativo (percentil 50) (2026-05-07) |
+| Clasificador con sesgo alcista puro (0 cortos) | ⚠ Estructural — `LSTMDirectionModel` aprende drift QQQ y produce probs siempre > 0.5. Encuadrar como "timing largo" en la presentación. El regresor híbrido no tiene este problema. |
 
 ---
 
