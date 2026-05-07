@@ -3,7 +3,7 @@
 ## Estado General: PROTOTIPO FUNCIONAL EN CONSTRUCCIÓN 🔄
 
 **Fecha de Inicio:** Abril 2026
-**Último Actualizado:** Abril 27, 2026
+**Último Actualizado:** Mayo 7, 2026
 **Timeline:** 2-3 meses para completar todas las fases
 
 ---
@@ -109,7 +109,7 @@ Cubierta en `QQQ_Hibrido_Completo.ipynb` Sección 5:
 
 ---
 
-## ⏳ FASE 6b: TimeGAN — Módulo Generativo (ESTRUCTURA LISTA)
+## ✅ FASE 6b: TimeGAN — Módulo Generativo (FUNCIONAL)
 
 Cubierta en `QQQ_Hibrido_Completo.ipynb` Sección 6:
 
@@ -117,6 +117,7 @@ Cubierta en `QQQ_Hibrido_Completo.ipynb` Sección 6:
 - [x] Entrenamiento WGAN-GP con n_critic=5, λ_gp=10
 - [x] Métricas generativas: Wasserstein Distance, hechos estilizados
 - [x] Visualización trayectorias reales vs generadas
+- [x] **Bug crítico resuelto (2026-05-07):** loop infinito silencioso en `GANTrainer.train_epoch` — el `while True` con `StopIteration` como control de flujo nunca alcanzaba el `break` cuando `len(loader) mod (n_critic+1) ≠ n_critic` (38 batches, n_critic=5). Fix: materializar batches como lista e iterar con índice explícito. Notebook corre completamente.
 - [ ] Aumentar épocas a 500+ para calidad distribucional suficiente
 - [ ] Escenario de stress-test con embedding COVID real (requiere Fase 4)
 
@@ -151,6 +152,7 @@ Cubierta en `QQQ_Hibrido_Completo.ipynb` Sección 6:
 | Sentimiento sin corpus | 🔄 Zeros como placeholder — Fase 4 lo resuelve |
 | Mercados volátiles | ✅ Huber Loss en lugar de MSE |
 | GAN inestabilidad | ✅ WGAN-GP (Gradient Penalty) en lugar de weight clipping |
+| Loop infinito en `GANTrainer.train_epoch` | ✅ Batches materializados como lista + índice explícito (2026-05-07) |
 
 ---
 

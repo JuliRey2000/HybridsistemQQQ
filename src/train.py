@@ -371,8 +371,6 @@ class GANTrainer:
             for _ in range(self.n_critic):
                 real_seq, sentiment = batches[idx]
                 idx += 1
-                real_seq  = real_seq.to(self.device)
-                sentiment = sentiment.to(self.device)
                 batch = real_seq.size(0)
 
                 z = self._sample_noise(batch)
@@ -399,8 +397,6 @@ class GANTrainer:
             # === 1 paso del generador ===
             real_seq, sentiment = batches[idx]
             idx += 1
-            real_seq  = real_seq.to(self.device)
-            sentiment = sentiment.to(self.device)
             batch = real_seq.size(0)
 
             z = self._sample_noise(batch)

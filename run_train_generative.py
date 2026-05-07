@@ -82,10 +82,9 @@ def main() -> None:
     real_train = real_seqs[:n_train]
     sent_train = sent_for_gan[:n_train]
 
-    ds = TensorDataset(
-        torch.from_numpy(real_train),
-        torch.from_numpy(sent_train),
-    )
+    real_train_gpu = torch.from_numpy(real_train).to(DEVICE)
+    sent_train_gpu = torch.from_numpy(sent_train).to(DEVICE)
+    ds = TensorDataset(real_train_gpu, sent_train_gpu)
     loader = DataLoader(ds, batch_size=BATCH_SIZE, shuffle=True, drop_last=True)
 
     # Construir modelos
