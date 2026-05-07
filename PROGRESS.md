@@ -8,6 +8,32 @@
 
 ---
 
+## Última Corrida — 2026-05-07
+
+**Notebook:** `QQQ_Hibrido_Completo.ipynb` | **Entorno:** Google Colab T4 | **FinBERT:** ceros (sin corpus)
+
+| Métrica | Walk-Forward (avg ± std) | Test Out-of-Sample |
+|---------|--------------------------|-------------------|
+| RMSE t+1 | 1.6064% ± 0.4837% | **1.0969%** |
+| DA   t+1 | 0.547 | **0.586** |
+| RMSE t+5 | 1.5781% ± 0.4853% | **1.1032%** |
+| DA   t+5 | 0.546 | **0.584** |
+| Sharpe t+1 | — | **1.203** ✓ |
+| MaxDD t+1  | — | **-13.85%** ✓ |
+
+**Targets de la tesis:**
+- RMSE < 0.8% → ✗ `1.0969%` (brecha: 0.30 pp — requiere FinBERT real)
+- Sharpe > 0.5 → ✓ `1.203`
+- MaxDD > -20% → ✓ `-13.85%`
+
+**Notas técnicas:**
+- Features: **10** = 9 indicadores técnicos (`RSI_14`, `MACD`, `MACD_Signal`, `MACD_Diff`, `BB_Pct`, `ATR_14`, `SMA_20`, `SMA_50`, `Vol_Change`) + `VIX_Close` añadido en `PriceDataLoader.load()` y no excluido en `create_sequences`. Documentación anterior decía 9 porque no contaba VIX.
+- Parámetros del modelo: 354,530
+- Test set: 365 muestras (último 15% del periodo 2015-2024)
+- Optimización VRAM aplicada: dataset GAN pre-cargado en GPU, sin transferencias CPU→GPU en training loop
+
+---
+
 ## Contexto de Notebooks
 
 | Notebook | Propósito | Estado |
@@ -118,6 +144,7 @@ Cubierta en `QQQ_Hibrido_Completo.ipynb` Sección 6:
 - [x] Métricas generativas: Wasserstein Distance, hechos estilizados
 - [x] Visualización trayectorias reales vs generadas
 - [x] **Bug crítico resuelto (2026-05-07):** loop infinito silencioso en `GANTrainer.train_epoch` — el `while True` con `StopIteration` como control de flujo nunca alcanzaba el `break` cuando `len(loader) mod (n_critic+1) ≠ n_critic` (38 batches, n_critic=5). Fix: materializar batches como lista e iterar con índice explícito. Notebook corre completamente.
+- [x] **Optimización VRAM aplicada (2026-05-07):** dataset GAN pre-cargado en GPU (`torch.from_numpy(...).to(device)`) en notebook, `run_train_generative.py` y `src/train.py`. Eliminados `.to(self.device)` redundantes en `GANTrainer.train_epoch`.
 - [ ] Aumentar épocas a 500+ para calidad distribucional suficiente
 - [ ] Escenario de stress-test con embedding COVID real (requiere Fase 4)
 
@@ -134,12 +161,14 @@ Cubierta en `QQQ_Hibrido_Completo.ipynb` Sección 6:
 
 ## Métricas Objetivo
 
-| Métrica | Baseline | LSTM solo | Híbrido | Target |
-|---------|----------|-----------|---------|--------|
-| RMSE (%) | 1.5 | 1.0 | 0.8 | < 0.8 |
-| MAE (%) | 1.2 | 0.8 | 0.6 | < 0.6 |
-| Sharpe | — | 0.3 | 0.5 | > 0.5 |
-| Max DD (%) | -25 | -20 | -15 | > -15 |
+| Métrica | Baseline | Híbrido (ceros) | Híbrido (FinBERT) | Target |
+|---------|----------|-----------------|-------------------|--------|
+| RMSE t+1 (%) | 1.5 | **1.0969** | esperado < 0.9 | < 0.8 |
+| DA   t+1 | — | **0.586** | esperado > 0.60 | > 0.55 |
+| Sharpe | — | **1.203** ✓ | — | > 0.5 |
+| Max DD (%) | -25 | **-13.85** ✓ | — | > -15 |
+
+*Columna "Híbrido (FinBERT)" se completará en Fase 5.*
 
 ---
 
@@ -156,13 +185,52 @@ Cubierta en `QQQ_Hibrido_Completo.ipynb` Sección 6:
 
 ---
 
-## Próximo Paso Inmediato
+## Próximos Pasos — Ordenados por Prioridad
 
-**Construir el corpus FinBERT (Fase 4):**
-1. Descargar FNSPID desde Kaggle
-2. Ejecutar `compute_embeddings.py` en Colab (GPU T4, ~3h para 2500 días)
-3. Subir `finbert_embeddings.csv` a `data/processed/`
-4. Reejecutar `QQQ_Hibrido_Completo.ipynb` con sentimiento real
+### PASO 1 — Verificar discrepancia de features (inmediato, 15 min)
+El resumen reporta **10 features técnicos** pero la documentación dice 9. Abrir `src/data_pipeline.py` y contar los indicadores que se calculan. Actualizar `PROGRESS.md` y `CLAUDE.md` con el número correcto.
+
+### PASO 2 — Construir corpus FinBERT (Fase 4, crítico para RMSE)
+Es la única ruta para bajar RMSE de 1.10% a < 0.8%. Sin esto la tesis no cumple el target principal.
+
+1. **Descargar FNSPID** (Kaggle, gratuito, ~2 GB):
+   ```
+   kaggle datasets download -d humananalog/fnspid
+   ```
+   Columnas necesarias: `[date, ticker, headline]`. Filtrar `date >= 2015-01-01`.
+
+2. **Descargar Tiingo API** para cubrir 2024 (endpoints de noticias, ~$10/mes):
+   - Endpoint: `https://api.tiingo.com/tiingo/news?tickers=QQQ&startDate=2024-01-01`
+   - Token en `.env` como `TIINGO_API_KEY`
+
+3. **Crear `fuentes/build_corpus.py`**: une FNSPID + Tiingo, forward-fill días sin noticias, agrupa por fecha.
+
+4. **Crear `fuentes/compute_embeddings.py`**: corre `ProsusAI/finbert` sobre los headlines, guarda CLS-token por día.
+   - Output: `data/processed/finbert_embeddings.csv` (2500 filas × 768 cols)
+   - Checkpoint cada 200 días para no perder progreso si Colab desconecta
+   - Sanity check: norma media > 5.0; embedding 2020-03-16 con signo negativo
+
+5. **Reejecutar** `QQQ_Hibrido_Completo.ipynb` con `finbert_embeddings.csv` en su lugar.
+
+### PASO 3 — Ablation study (Fase 5, una vez disponible FinBERT)
+Comparar tres configuraciones para cuantificar el aporte de cada componente:
+
+| Experimento | Descripción |
+|-------------|-------------|
+| A — Precio solo | `HybridPredictiveModel` con sentimiento = ceros (ya hecho: RMSE 1.10%) |
+| B — Precio + FinBERT | Mismo modelo, embeddings reales (objetivo: RMSE < 0.8%) |
+| C — Sin CrossAttention | Ablación de la capa de fusión (tabla comparativa para tesis) |
+
+### PASO 4 — TimeGAN calidad distribucional (Fase 6b)
+Una vez FinBERT disponible:
+- Aumentar `GAN_EPOCHS` a 500 en `config.py`
+- Generar escenarios condicionados al embedding COVID (2020-03-16)
+- Reportar hechos estilizados: clustering de volatilidad, leverage effect, kurtosis
+
+### PASO 5 — Documentación final (Fase 7)
+- Diagrama de arquitectura del sistema híbrido
+- Análisis de interpretabilidad: attention weights por feature técnico
+- Redacción de sección de metodología para la tesis
 
 ---
 
