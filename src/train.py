@@ -358,18 +358,19 @@ class GANTrainer:
         self.critic.train()
 
         epoch_critic, epoch_gen, epoch_wd = [], [], []
-        data_iter = iter(real_loader)
 
-        while True:
+        # Materializar todos los batches evita depender de StopIteration como
+        # control de flujo: con n_critic=5 y batches no divisibles por 6 el
+        # while True original se reiniciaba indefinidamente sin terminar.
+        batches = list(real_loader)
+        idx = 0
+
+        while idx + self.n_critic < len(batches):
+
             # === n_critic pasos del crítico ===
-            critic_losses = []
             for _ in range(self.n_critic):
-                try:
-                    real_seq, sentiment = next(data_iter)
-                except StopIteration:
-                    data_iter = iter(real_loader)
-                    real_seq, sentiment = next(data_iter)
-
+                real_seq, sentiment = batches[idx]
+                idx += 1
                 real_seq  = real_seq.to(self.device)
                 sentiment = sentiment.to(self.device)
                 batch = real_seq.size(0)
@@ -387,24 +388,17 @@ class GANTrainer:
                 )
 
                 loss_critic = score_fake.mean() - score_real.mean() + gp
-
                 self.opt_critic.zero_grad()
                 loss_critic.backward()
                 self.opt_critic.step()
 
-                # Wasserstein distance aproximada (sin GP)
                 w_dist = (score_real.mean() - score_fake.mean()).item()
-                critic_losses.append(loss_critic.item())
+                epoch_critic.append(loss_critic.item())
                 epoch_wd.append(w_dist)
 
-            epoch_critic.extend(critic_losses)
-
             # === 1 paso del generador ===
-            try:
-                real_seq, sentiment = next(data_iter)
-            except StopIteration:
-                break  # fin de época
-
+            real_seq, sentiment = batches[idx]
+            idx += 1
             real_seq  = real_seq.to(self.device)
             sentiment = sentiment.to(self.device)
             batch = real_seq.size(0)
@@ -414,11 +408,9 @@ class GANTrainer:
             score_fake = self.critic(fake_seq, sentiment)
 
             loss_gen = -score_fake.mean()
-
             self.opt_gen.zero_grad()
             loss_gen.backward()
             self.opt_gen.step()
-
             epoch_gen.append(loss_gen.item())
 
         return {
