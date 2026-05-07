@@ -277,7 +277,8 @@ def _gradient_penalty(
 
     interpolated = (eps * real_seq + (1 - eps) * fake_seq).requires_grad_(True)
 
-    score_interp = critic(interpolated, sentiment)
+    with torch.backends.cudnn.flags(enabled=False):
+        score_interp = critic(interpolated, sentiment)
 
     gradients = torch.autograd.grad(
         outputs=score_interp,
