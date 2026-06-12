@@ -208,6 +208,14 @@ class Trainer:
                 logger.info(f"Detenido en época {epoch}.")
                 break
 
+        # Restaurar los pesos del mejor checkpoint: sin esto, el modelo queda
+        # con los pesos de la última época (hasta `patience` épocas pasado el
+        # óptimo) y toda evaluación posterior usaría un modelo sobreajustado.
+        if Path(save_path).exists():
+            self.model.load_state_dict(
+                torch.load(save_path, map_location=self.device)
+            )
+
         logger.info(f"Mejor val_loss: {best_val:.6f} — modelo en {save_path}")
         return self.history
 

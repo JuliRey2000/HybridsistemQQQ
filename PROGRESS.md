@@ -3,8 +3,63 @@
 ## Estado General: PROTOTIPO FUNCIONAL EN CONSTRUCCIÓN 🔄
 
 **Fecha de Inicio:** Abril 2026
-**Último Actualizado:** Mayo 7, 2026
+**Último Actualizado:** Junio 12, 2026
 **Timeline:** 2-3 meses para completar todas las fases
+
+---
+
+## Cambios 2026-06-12 — Correcciones metodológicas (REQUIERE RE-EJECUCIÓN EN COLAB)
+
+Dos bugs metodológicos reales corregidos + mejoras. **Las métricas del 2026-05-07 quedan
+invalidadas como referencia final**: se calcularon con features sin normalizar y con los
+pesos de la última época (no los del early stopping). Hay que reejecutar
+`QQQ_Hibrido_Completo.ipynb` completo en Colab para obtener las métricas corregidas.
+
+### Bug 1 — Features sin normalizar (data leakage doc vs realidad)
+`fit_scalers()` existía en `data_pipeline.py` pero **nunca se llamaba**: el modelo entrenaba
+con SMA_20/SMA_50/ATR/MACD en USD (~100→530, crecientes 2015→2024), RSI en [0,100] y
+BB_Pct en [0,1] mezclados. El test set (2024) quedaba fuera de la distribución de
+entrenamiento. **Fix:** `scale_price_sequences()` / `transform_price_sequences()` en
+`src/utils.py` — StandardScaler ajustado por fold SOLO con ventanas de train (sin leakage),
+aplicado en notebook (`cell-wf-train`, `cell-test-eval`) y en `run_train_predictive.py`.
+El scaler del mejor fold se guarda en `models/hybrid_best_scaler.joblib` y el test se
+transforma con él. El baseline Ridge usa su propio scaler (train+val).
+
+### Bug 2 — Métricas por fold con pesos de la última época
+`Trainer.fit` guardaba el mejor checkpoint pero no lo restauraba al modelo; las métricas
+por fold (y el modelo en memoria) correspondían a la última época (hasta `patience`=15
+épocas pasado el óptimo). **Fix:** `Trainer.fit` ahora restaura el best state_dict al final.
+
+### Bug 3 — Alineación sentimiento↔ventanas en TimeGAN
+`gan_sents[i]` usaba `sentiments[i]`, pero la ventana GAN i empieza en `price_df[i]` y
+`sentiments[j]` corresponde a `price_df[LOOKBACK + j]`. Con ceros no tenía efecto, pero
+habría desalineado el conditioning al integrar FinBERT real. **Fix:** offset `i - LOOKBACK`.
+
+### Mejoras
+- **EDA estadístico** (cierra pendientes de Fase 2): test ADF de estacionariedad
+  (retornos vs precio), ACF/PACF de retornos y |retornos| (volatility clustering),
+  matriz de correlación de los 10 features con detección de pares |r| > 0.9.
+- **Selección de THRESHOLD** (cierra pendiente de Fase 6): tabla de sensibilidad con
+  métricas completas por umbral (Sharpe, Sortino, MaxDD, retorno, win rate, exposición)
+  y recomendación automática (máx. Sharpe con exposición ≥ 30%). Se loguea a MLflow.
+- Guard en `cell-pipeline`: aborta si la caché `.npy` tiene < 10 features (pre-VIX).
+- `statsmodels` añadido a `requirements.txt` y a la celda de instalación.
+- Artefactos MLflow nuevos: scaler del mejor fold + figuras EDA.
+
+### PASO 1 (verificación de features) — RESUELTO
+Confirmado contando en `src/data_pipeline.py`: `create_sequences` excluye
+`[Daily_Return, Close, Open, High, Low, Volume]`, quedando **10 features** =
+9 indicadores técnicos (`RSI_14, MACD, MACD_Signal, MACD_Diff, BB_Pct, ATR_14,
+SMA_20, SMA_50, Vol_Change`) + `VIX_Close`. Comentarios "9 features" corregidos
+en el notebook; `CLAUDE.md` ya decía 10.
+
+### Observación metodológica para discutir con la directora
+`y_t5` es el **retorno puntual del día t+5** (`Daily_Return.iloc[i+5]`), no el retorno
+acumulado de 5 días. Predecir el retorno de un único día a 5 días vista tiene señal
+casi nula (RMSE t+5 ≈ RMSE t+1 lo confirma). Si la tesis define el horizonte t+5 como
+acumulado, habría que cambiar el target en `create_sequences` — pero eso cambia la
+escala del RMSE (×√5 aprox.) y no sería comparable con el target < 0.8%. Decisión
+pendiente con Sonia Jaramillo; no se cambió nada.
 
 ---
 
@@ -74,9 +129,9 @@ Cubierta en `QQQ_Hibrido_Completo.ipynb` Sección 2:
 - [x] Precio de cierre, retornos diarios, distribución, RSI
 - [x] Verificación COVID (crash mar 2020 retenido)
 - [x] Estadísticos: skewness, kurtosis, media, std
-- [ ] ACF/PACF (autocorrelación — pendiente notebook dedicado)
-- [ ] Test ADF de estacionariedad formal
-- [ ] Matriz de correlación entre los 9 features técnicos
+- [x] ACF/PACF de retornos y |retornos| (celda EDA estadística — 2026-06-12)
+- [x] Test ADF de estacionariedad formal (retornos vs precio — 2026-06-12)
+- [x] Matriz de correlación entre los 10 features (2026-06-12)
 
 ---
 
@@ -144,7 +199,7 @@ Cubierta en `QQQ_Hibrido_Completo.ipynb` Sección 5:
 - [x] Diagnóstico de exposición al mercado y tabla de sensibilidad de THRESHOLD (`QQQ_Hibrido_Completo.ipynb`)
 - [x] Análisis de exposición con zona de confianza adaptativa (`QQQ_Prototipo_Colab.ipynb` — Sección 6)
 - [x] Diagnóstico de sesgo alcista en clasificador (detectado y documentado)
-- [ ] Elegir THRESHOLD óptimo para `QQQ_Hibrido_Completo` basado en tabla de sensibilidad
+- [x] Tabla de sensibilidad de THRESHOLD con métricas completas + recomendación automática (2026-06-12; el valor concreto sale de la próxima corrida)
 - [ ] Robustez a diferentes regímenes de mercado (alcista 2017-2019, caída 2022)
 
 ---
@@ -191,7 +246,9 @@ Cubierta en `QQQ_Hibrido_Completo.ipynb` Sección 6:
 | Problema | Solución |
 |----------|----------|
 | Look-ahead bias | ✅ Walk-forward cronológico sin shuffle |
-| Data leakage en normalización | ✅ Scaler ajustado solo en train, transform en val/test |
+| Data leakage en normalización | ✅ Scaler por fold ajustado solo en train (implementado de verdad el 2026-06-12 — antes `fit_scalers` existía pero nunca se llamaba y los features iban crudos) |
+| Métricas de fold con pesos de última época | ✅ `Trainer.fit` restaura el mejor checkpoint (2026-06-12) |
+| Sentimiento GAN desalineado con ventanas | ✅ Offset `i - LOOKBACK` en `cell-gan-setup` (2026-06-12) |
 | Sentimiento sin corpus | 🔄 Zeros como placeholder — Fase 4 lo resuelve |
 | Mercados volátiles | ✅ Huber Loss en lugar de MSE |
 | GAN inestabilidad | ✅ WGAN-GP (Gradient Penalty) en lugar de weight clipping |
@@ -204,8 +261,11 @@ Cubierta en `QQQ_Hibrido_Completo.ipynb` Sección 6:
 
 ## Próximos Pasos — Ordenados por Prioridad
 
-### PASO 1 — Verificar discrepancia de features (inmediato, 15 min)
-El resumen reporta **10 features técnicos** pero la documentación dice 9. Abrir `src/data_pipeline.py` y contar los indicadores que se calculan. Actualizar `PROGRESS.md` y `CLAUDE.md` con el número correcto.
+### PASO 1 — ✅ RESUELTO (2026-06-12)
+Son **10 features** (9 indicadores técnicos + VIX_Close). Documentación y comentarios corregidos. Ver sección "Cambios 2026-06-12".
+
+### PASO 1b — Reejecutar `QQQ_Hibrido_Completo.ipynb` en Colab (NUEVO, prioritario)
+Las correcciones del 2026-06-12 (normalización por fold + restauración de mejores pesos) cambian las métricas. Ejecutar el notebook completo en Colab T4 y actualizar la sección "Última Corrida" con los nuevos números antes de citarlos en la tesis.
 
 ### PASO 2 — Construir corpus FinBERT (Fase 4, crítico para RMSE)
 Es la única ruta para bajar RMSE de 1.10% a < 0.8%. Sin esto la tesis no cumple el target principal.

@@ -18,6 +18,9 @@ sentencepiece==0.1.99
 # Generative evaluation
 scipy==1.11.4
 
+# EDA estadístico (ADF, ACF/PACF)
+statsmodels==0.14.1
+
 # Visualization
 matplotlib==3.8.2
 seaborn==0.13.0

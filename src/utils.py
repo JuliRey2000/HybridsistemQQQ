@@ -81,6 +81,55 @@ def final_test_split(n: int, test_frac: float = 0.15) -> Tuple[int, int]:
 
 
 # ============================================================================
+# NORMALIZACIÓN DE SECUENCIAS (sin data leakage)
+# ============================================================================
+
+def scale_price_sequences(
+    price_seqs: np.ndarray,
+    fit_idx: np.ndarray,
+) -> Tuple[np.ndarray, "object"]:
+    """
+    Normaliza las secuencias de features con StandardScaler ajustado SOLO
+    sobre las ventanas de entrenamiento (sin data leakage temporal).
+
+    Crítico para este dataset: SMA_20/SMA_50 y ATR están en USD (~100-530 y
+    crecientes 2015→2024), RSI en [0,100], BB_Pct en [0,1]. Sin normalizar,
+    el LSTM recibe escalas mezcladas y el test set queda fuera de la
+    distribución de entrenamiento (los precios de 2024 superan todo lo visto).
+
+    Args:
+        price_seqs: (n, lookback, features) — secuencias completas
+        fit_idx   : índices de las muestras de entrenamiento (el scaler solo
+                    ve días <= último día de entrenamiento)
+
+    Returns:
+        (scaled, scaler):
+          scaled — array completo (n, lookback, features) transformado
+          scaler — StandardScaler ajustado (para transformar datos futuros)
+    """
+    from sklearn.preprocessing import StandardScaler
+
+    n, lookback, n_features = price_seqs.shape
+    scaler = StandardScaler().fit(price_seqs[fit_idx].reshape(-1, n_features))
+    scaled = (
+        scaler.transform(price_seqs.reshape(-1, n_features))
+        .reshape(n, lookback, n_features)
+        .astype(np.float32)
+    )
+    return scaled, scaler
+
+
+def transform_price_sequences(price_seqs: np.ndarray, scaler) -> np.ndarray:
+    """Aplica un scaler ya ajustado a secuencias (n, lookback, features)."""
+    n, lookback, n_features = price_seqs.shape
+    return (
+        scaler.transform(price_seqs.reshape(-1, n_features))
+        .reshape(n, lookback, n_features)
+        .astype(np.float32)
+    )
+
+
+# ============================================================================
 # MÉTRICAS PREDICTIVAS
 # ============================================================================
 

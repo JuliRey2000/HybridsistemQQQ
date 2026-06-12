@@ -20,10 +20,13 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+import joblib
+
 from src.models import HybridPredictiveModel, print_model_summary
 from src.train import Trainer, make_dataloader, predict
 from src.utils import (
     walk_forward_splits, final_test_split,
+    scale_price_sequences, transform_price_sequences,
     predictive_metrics, sharpe_ratio, long_short_strategy,
     plot_predictions, plot_training_history, plot_cumulative_returns,
 )
@@ -93,6 +96,9 @@ def main() -> None:
         logger.info(f"FOLD {fold}/{len(splits)} | Train [{tr_idx[0]}..{tr_idx[-1]}] | Val [{vl_idx[0]}..{vl_idx[-1]}]")
         logger.info(f"{'─'*55}")
 
+        # Normalización sin leakage: scaler ajustado SOLO con ventanas de train
+        seqs_scaled, fold_scaler = scale_price_sequences(data["price_seqs"], tr_idx)
+
         model = build_model()
         if fold == 1:
             print_model_summary(model)
@@ -107,12 +113,12 @@ def main() -> None:
         )
 
         train_loader = make_dataloader(
-            data["price_seqs"], data["sentiments"],
+            seqs_scaled, data["sentiments"],
             data["y_t1"], data["y_t5"],
             tr_idx, batch_size=BATCH_SIZE,
         )
         val_loader = make_dataloader(
-            data["price_seqs"], data["sentiments"],
+            seqs_scaled, data["sentiments"],
             data["y_t1"], data["y_t5"],
             vl_idx, batch_size=BATCH_SIZE,
         )
@@ -124,20 +130,21 @@ def main() -> None:
             save_path=save_path,
         )
 
-        # Evaluar en validación de este fold
-        preds_t1, preds_t5 = predict(model, data["price_seqs"][vl_idx], data["sentiments"][vl_idx], device=DEVICE)
+        # Evaluar en validación de este fold (trainer.fit restaura los mejores pesos)
+        preds_t1, preds_t5 = predict(model, seqs_scaled[vl_idx], data["sentiments"][vl_idx], device=DEVICE)
         m = predictive_metrics(data["y_t1"][vl_idx], preds_t1.flatten())
         m["Sharpe"] = sharpe_ratio(data["y_t1"][vl_idx] * np.sign(preds_t1.flatten()))
         logger.info(f"Fold {fold} val → RMSE: {m['RMSE']:.4f} | DA: {m['Directional_Accuracy']:.3f} | Sharpe: {m['Sharpe']:.3f}")
         fold_val_metrics.append(m)
 
-        # Mantener checkpoint del mejor fold (menor RMSE en validación)
+        # Mantener checkpoint del mejor fold (menor RMSE en validación) + su scaler
         fold_rmse = m["RMSE"]
         if fold_rmse < best_val_loss:
             best_val_loss = fold_rmse
             best_fold     = fold
             import shutil
             shutil.copy(save_path, str(MODELS_PATH / "hybrid_best.pth"))
+            joblib.dump(fold_scaler, str(MODELS_PATH / "hybrid_best_scaler.joblib"))
             logger.info(f"  → Nuevo mejor fold={fold}  RMSE_val={fold_rmse:.4f}  (guardado como hybrid_best.pth)")
 
         plot_training_history(history, save_path=str(RESULTS_PATH / f"history_fold{fold}.png"))
@@ -158,12 +165,16 @@ def main() -> None:
     logger.info("\nEVALUACIÓN FINAL — TEST OUT-OF-SAMPLE")
 
     # Cargar el mejor checkpoint (menor RMSE de validación entre todos los folds)
+    # junto con el scaler del mismo fold — el test debe transformarse con las
+    # mismas estadísticas que vio el modelo en entrenamiento
     best_model = build_model()
     best_model.load_state_dict(torch.load(str(MODELS_PATH / "hybrid_best.pth"), map_location=DEVICE))
+    best_scaler = joblib.load(str(MODELS_PATH / "hybrid_best_scaler.joblib"))
 
     test_idx = np.arange(test_start, n)
+    seqs_test_scaled = transform_price_sequences(data["price_seqs"][test_idx], best_scaler)
     preds_t1_test, preds_t5_test = predict(
-        best_model, data["price_seqs"][test_idx], data["sentiments"][test_idx], device=DEVICE
+        best_model, seqs_test_scaled, data["sentiments"][test_idx], device=DEVICE
     )
 
     y_test_t1 = data["y_t1"][test_idx]
