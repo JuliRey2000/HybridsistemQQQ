@@ -86,7 +86,15 @@ class Trainer:
     Entrena HybridPredictiveModel con pérdida Huber multi-step.
 
     La pérdida total combina t+1 y t+5 con peso ajustable:
-        L = w1 * Huber(pred_t1, y_t1) + w5 * Huber(pred_t5, y_t5)
+        L = w1 * Huber(pred_t1, y_t1) + w5 * Huber(pred_t5/s, y_t5/s)
+
+    y_t5 es el retorno ACUMULADO de 5 días, cuya desviación estándar es
+    ~√5 veces la del retorno diario. El residuo t+5 se divide por s=√5
+    (t5_scale) para que ambos horizontes contribuyan a la pérdida en
+    unidades comparables — sin esto el término t+5 dominaría el gradiente
+    y el early stopping — y para que el delta de Huber conserve el mismo
+    significado en ambos términos. Las predicciones del modelo siguen en
+    escala acumulada natural; la normalización solo afecta la pérdida.
 
     Huber es más robusta que MSE ante retornos extremos (e.g. COVID crash).
 
@@ -97,6 +105,8 @@ class Trainer:
         weight_decay: L2 regularización (default: 1e-5)
         w_t1       : peso de la pérdida t+1 (default: 0.6)
         w_t5       : peso de la pérdida t+5 (default: 0.4)
+        t5_scale   : divisor del residuo t+5 (default: √5, std relativa
+                     del retorno acumulado de 5 días vs el diario)
     """
 
     def __init__(
@@ -107,11 +117,13 @@ class Trainer:
         weight_decay: float = 1e-5,
         w_t1: float = 0.6,
         w_t5: float = 0.4,
+        t5_scale: float = 5 ** 0.5,
     ):
         self.model = model.to(device)
         self.device = torch.device(device)
         self.w_t1 = w_t1
         self.w_t5 = w_t5
+        self.t5_scale = t5_scale
 
         self.criterion = nn.HuberLoss(delta=1.0)
         self.optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
@@ -145,7 +157,8 @@ class Trainer:
                 pred_t1, pred_t5 = self.model(price_seq, sentiment)
 
                 loss = self.w_t1 * self.criterion(pred_t1, y_t1) \
-                     + self.w_t5 * self.criterion(pred_t5, y_t5)
+                     + self.w_t5 * self.criterion(pred_t5 / self.t5_scale,
+                                                  y_t5 / self.t5_scale)
 
                 if training:
                     self.optimizer.zero_grad()

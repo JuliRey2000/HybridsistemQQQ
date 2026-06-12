@@ -296,8 +296,8 @@ def create_sequences(
     Cada muestra contiene:
       - price_seq  : últimos `lookback` días de features técnicos
       - sentiment  : embedding FinBERT del día actual (o cero si no hay)
-      - y_t1       : retorno en t+1
-      - y_t5       : retorno en t+5
+      - y_t1       : retorno (log, %) en t+1
+      - y_t5       : retorno ACUMULADO (log, %) de t+1 a t+5
       - dates      : fecha del día de predicción
 
     El orden temporal se preserva estrictamente. No hay aleatorización.
@@ -307,7 +307,7 @@ def create_sequences(
         sentiment_df  : DataFrame con embeddings FinBERT (index=date) o None
         lookback      : días de historia (default: 30)
         horizon_t1    : días al futuro para y_t1 (default: 1)
-        horizon_t5    : días al futuro para y_t5 (default: 5)
+        horizon_t5    : horizonte acumulado para y_t5 (default: 5)
         price_feature_cols: columnas a usar como features (si None, auto-selecciona)
 
     Returns:
@@ -344,9 +344,10 @@ def create_sequences(
             sent = np.zeros(sentiment_dim, dtype=np.float32)
         sentiments.append(sent)
 
-        # Targets
+        # Targets — Daily_Return es log-return (%), así que el retorno
+        # acumulado del horizonte es la suma: 100·ln(P_{i+h} / P_i)
         y_t1s.append(price_df["Daily_Return"].iloc[i + horizon_t1])
-        y_t5s.append(price_df["Daily_Return"].iloc[i + horizon_t5])
+        y_t5s.append(price_df["Daily_Return"].iloc[i + 1 : i + horizon_t5 + 1].sum())
         dates.append(price_df.index[i])
 
     return {

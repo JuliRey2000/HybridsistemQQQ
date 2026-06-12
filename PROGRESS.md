@@ -10,10 +10,12 @@
 
 ## Cambios 2026-06-12 — Correcciones metodológicas (REQUIERE RE-EJECUCIÓN EN COLAB)
 
-Dos bugs metodológicos reales corregidos + mejoras. **Las métricas del 2026-05-07 quedan
-invalidadas como referencia final**: se calcularon con features sin normalizar y con los
-pesos de la última época (no los del early stopping). Hay que reejecutar
-`QQQ_Hibrido_Completo.ipynb` completo en Colab para obtener las métricas corregidas.
+Dos bugs metodológicos reales corregidos + mejoras, y en la sesión 2 del mismo día se
+redefinió el target `y_t5` como retorno acumulado de 5 días (ver más abajo). **Las
+métricas del 2026-05-07 quedan invalidadas como referencia final**: se calcularon con
+features sin normalizar, con los pesos de la última época (no los del early stopping)
+y con la definición antigua de `y_t5`. Hay que reejecutar `QQQ_Hibrido_Completo.ipynb`
+completo en Colab para obtener las métricas corregidas.
 
 ### Bug 1 — Features sin normalizar (data leakage doc vs realidad)
 `fit_scalers()` existía en `data_pipeline.py` pero **nunca se llamaba**: el modelo entrenaba
@@ -53,13 +55,35 @@ Confirmado contando en `src/data_pipeline.py`: `create_sequences` excluye
 SMA_20, SMA_50, Vol_Change`) + `VIX_Close`. Comentarios "9 features" corregidos
 en el notebook; `CLAUDE.md` ya decía 10.
 
-### Observación metodológica para discutir con la directora
-`y_t5` es el **retorno puntual del día t+5** (`Daily_Return.iloc[i+5]`), no el retorno
-acumulado de 5 días. Predecir el retorno de un único día a 5 días vista tiene señal
-casi nula (RMSE t+5 ≈ RMSE t+1 lo confirma). Si la tesis define el horizonte t+5 como
-acumulado, habría que cambiar el target en `create_sequences` — pero eso cambia la
-escala del RMSE (×√5 aprox.) y no sería comparable con el target < 0.8%. Decisión
-pendiente con Sonia Jaramillo; no se cambió nada.
+### Cambio de target (sesión 2) — `y_t5` ahora es retorno ACUMULADO de 5 días — RESUELTO
+`y_t5` era el retorno **puntual** del día t+5 (`Daily_Return.iloc[i+5]`): predecir el
+retorno de un único día a 5 días vista tiene señal casi nula (RMSE t+5 ≈ RMSE t+1 lo
+confirmaba). Ahora `create_sequences` lo define como la **suma de los 5 log-returns
+siguientes**, equivalente a `100·ln(P_{t+5}/P_t)` — la definición estándar de horizonte
+multi-día. Decisiones de implementación:
+
+- **Pérdida** (`src/train.py`): el residuo t+5 se divide por √5 (`t5_scale`) dentro del
+  Huber. La std del acumulado es ~√5× la diaria; sin esta normalización el término t+5
+  dominaría el gradiente y el early stopping, degradando la métrica principal t+1.
+  Los pesos `W_T1=0.6 / W_T5=0.4` conservan así su significado, y el delta de Huber
+  opera en la misma escala en ambos términos. Las predicciones del modelo siguen en
+  escala acumulada natural.
+- **Escala del RMSE t+5**: vive ahora en escala ~√5 (≈ 2.2×). Se reporta también el
+  **equivalente diario** (RMSE/√5) en notebook, `run_train_predictive.py` y MLflow
+  (`test_rmse_t5_daily_eq`) — ese es el número comparable con t+1. El target de la
+  tesis (RMSE < 0.8%) siempre se evaluó sobre t+1 y no se ve afectado.
+- **Guard de caché** en `cell-pipeline`: aborta si `std(y_t5) ≈ std(y_t1)` (delata un
+  `.npy` con la definición antigua). En Colab no aplica (el pipeline corre fresco al
+  clonar), pero protege entornos con caché persistida.
+- **Backtest t+5** (`cell-backtest`): marcado como solo referencia direccional —
+  compone retornos acumulados de 5 días solapados con paso diario, así que su
+  Sharpe/MaxDD quedan inflados.
+- Los RMSE t+5 históricos (2026-05-07) usan la definición antigua: **no comparables**.
+- Verificado con test sintético: `y_t5[i] == 100·ln(P_{i+5}/P_i)` exacto.
+
+Para validar con Sonia: que la tesis defina el horizonte t+5 como acumulado (es la
+convención estándar). Si requiriera el puntual, revertir es una línea en
+`create_sequences`.
 
 ---
 
@@ -256,6 +280,7 @@ Cubierta en `QQQ_Hibrido_Completo.ipynb` Sección 6:
 | MLflow "run already active" en notebook póster | ✅ Guard `if mlflow.active_run(): mlflow.end_run()` en `cell-23`; `cell-24` duplicada eliminada (2026-05-07) |
 | Exposición 0% en análisis de exposición del póster | ✅ `CONFIDENCE_MARGIN` hardcodeado a 0.10 superaba el rango real de probs [0.521–0.528]; ahora adaptativo (percentil 50) (2026-05-07) |
 | Clasificador con sesgo alcista puro (0 cortos) | ⚠ Estructural — `LSTMDirectionModel` aprende drift QQQ y produce probs siempre > 0.5. Encuadrar como "timing largo" en la presentación. El regresor híbrido no tiene este problema. |
+| `y_t5` era retorno puntual del día t+5 (señal casi nula) | ✅ `y_t5` = retorno acumulado de 5 días; residuo t+5 normalizado por √5 en la pérdida; RMSE t+5 reportado también como equivalente diario (2026-06-12, sesión 2) |
 
 ---
 

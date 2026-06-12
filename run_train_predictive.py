@@ -186,7 +186,13 @@ def main() -> None:
     bt = long_short_strategy(y_test_t1, preds_t1_test.flatten())
 
     logger.info(f"\nTest t+1 → RMSE: {m_test_t1['RMSE']:.4f} | DA: {m_test_t1['Directional_Accuracy']:.3f}")
-    logger.info(f"Test t+5 → RMSE: {m_test_t5['RMSE']:.4f} | DA: {m_test_t5['Directional_Accuracy']:.3f}")
+    # y_t5 es retorno acumulado de 5 días: su RMSE vive en escala ~√5×;
+    # el equivalente diario (RMSE/√5) es el comparable con t+1
+    logger.info(
+        f"Test t+5 → RMSE: {m_test_t5['RMSE']:.4f} "
+        f"(equiv. diario: {m_test_t5['RMSE'] / np.sqrt(5):.4f}) "
+        f"| DA: {m_test_t5['Directional_Accuracy']:.3f}"
+    )
     logger.info(f"Backtesting → Sharpe: {bt['strategy_sharpe']:.3f} | Max DD: {bt['strategy_max_drawdown']:.2f}%")
     logger.info(f"Buy & Hold  → Sharpe: {bt['bh_sharpe']:.3f}")
 
