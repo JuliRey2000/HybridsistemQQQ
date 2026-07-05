@@ -4,6 +4,38 @@
 
 **Fecha de Inicio:** Abril 2026
 **Último Actualizado:** Julio 4, 2026
+
+---
+
+## ▶ ARRANQUE MAÑANA — indicación única: **"ejecuta el PASO 2b"**
+
+Con esa sola frase, Claude implementa en este orden (local → commit → push):
+
+1. **Ensemble de folds en test**: guardar `hybrid_fold{k}.pth` + scaler de cada fold en el
+   walk-forward (`cell-wf-train`) y en `cell-test-eval` promediar las predicciones de los
+   5 modelos (cada uno con su scaler). Tabla comparativa: mejor fold vs ensemble.
+2. **Significancia estadística** en la evaluación de test: Pesaran-Timmermann sobre DA
+   (t+1 y t+5) + Diebold-Mariano del híbrido vs Naive y vs Ridge.
+3. **Fila Naive/Ridge** citada junto al RMSE del híbrido con mejora % (insumo para la
+   discusión del target 0.8%).
+4. **Tabla fold → régimen**: fechas de validación de cada fold con su RMSE/DA (2018,
+   COVID 2020, bear 2022...).
+5. Documentar `GAN_EPOCHS=500` para la corrida generativa final (vía `.env` en Colab).
+
+**Luego tú, en Colab (~40-60 min T4):**
+1. Abrir `QQQ_Hibrido_Completo.ipynb` → ejecutar celda 0 (hace `git pull`).
+2. Run all hasta la Sección 5 incluida (el GAN no hace falta para validar el ensemble).
+3. Pegar aquí la salida del resumen (como hoy).
+
+**Criterio de éxito:** RMSE t+1 ensemble ≤ 1.1073% y DA ≥ 0.586; tests con p < 0.05.
+
+**Pendientes que solo tú puedes destrabar (cuando puedas, no bloquean lo de mañana):**
+- **Corpus FinBERT** (el bloqueante real del RMSE): `kaggle.json` + `TIINGO_API_KEY` →
+  `python run_corpus.py` (~3h T4).
+- **Sanity check MLflow (2 min)**: confirmar en DagsHub que `test_da_t1`/`test_sharpe_t1`
+  (0.586 / 1.203) provienen del run nuevo y no de caché.
+- **Mensaje a Sonia**: proponer reformular el target RMSE < 0.8% como mejora relativa al
+  baseline + targets DA/Sharpe (ver nota en "Última Corrida — 2026-07-04").
 **Timeline:** 2-3 meses para completar todas las fases
 
 ---
