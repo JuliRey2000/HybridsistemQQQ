@@ -1,9 +1,9 @@
 # Progreso del Proyecto
 
-## Estado General: PROTOTIPO FUNCIONAL EN CONSTRUCCIÓN 🔄
+## Estado General: PROTOTIPO FUNCIONAL VALIDADO ✅ — BLOQUEANTE: CORPUS FINBERT
 
 **Fecha de Inicio:** Abril 2026
-**Último Actualizado:** Junio 12, 2026
+**Último Actualizado:** Julio 4, 2026
 **Timeline:** 2-3 meses para completar todas las fases
 
 ---
@@ -14,8 +14,8 @@ Dos bugs metodológicos reales corregidos + mejoras, y en la sesión 2 del mismo
 redefinió el target `y_t5` como retorno acumulado de 5 días (ver más abajo). **Las
 métricas del 2026-05-07 quedan invalidadas como referencia final**: se calcularon con
 features sin normalizar, con los pesos de la última época (no los del early stopping)
-y con la definición antigua de `y_t5`. Hay que reejecutar `QQQ_Hibrido_Completo.ipynb`
-completo en Colab para obtener las métricas corregidas.
+y con la definición antigua de `y_t5`. **Re-ejecutado en Colab el 2026-07-04** — las
+métricas corregidas están en la sección "Última Corrida — 2026-07-04" y son las citables.
 
 ### Bug 1 — Features sin normalizar (data leakage doc vs realidad)
 `fit_scalers()` existía en `data_pipeline.py` pero **nunca se llamaba**: el modelo entrenaba
@@ -87,7 +87,41 @@ convención estándar). Si requiriera el puntual, revertir es una línea en
 
 ---
 
-## Última Corrida — 2026-05-07 (actualización 2)
+## Última Corrida — 2026-07-04 (post-correcciones) ✅ MÉTRICAS CITABLES
+
+**Notebook:** `QQQ_Hibrido_Completo.ipynb` | **Entorno:** Google Colab T4 | **FinBERT:** ceros (sin corpus)
+**Incluye:** normalización por fold sin leakage, restauración del mejor checkpoint, `y_t5` = retorno acumulado de 5 días.
+**Modelo:** 354,530 parámetros | **Test:** 365 muestras (15% final) | **Período:** 2015-01-01 → 2024-12-31
+
+| Métrica | Walk-Forward (avg ± std) | Test Out-of-Sample |
+|---------|--------------------------|-------------------|
+| RMSE t+1 | 1.6012% ± 0.4766% | **1.1073%** |
+| DA   t+1 | 0.561 | **0.586** |
+| RMSE t+5 (acumulado) | 3.3247% ± 1.0717% | **2.4483%** |
+| RMSE t+5 (equiv. diario) | 1.4868% | **1.0949%** |
+| DA   t+5 | 0.565 | **0.595** |
+| Sharpe t+1 | — | **1.203** ✓ |
+| MaxDD t+1  | — | **-13.85%** ✓ |
+
+**THRESHOLD recomendado:** 0.00% (máx. Sharpe = 1.203 con exposición ≥ 30%).
+
+**Targets de la tesis:**
+- RMSE < 0.8% → ✗ `1.1073%` (brecha 0.31 pp — ver nota sobre realismo del target al final de esta sección)
+- Sharpe > 0.5 → ✓ `1.203`
+- MaxDD > -20% → ✓ `-13.85%`
+
+**Comparación con la corrida invalidada (2026-05-07):**
+- Walk-forward mejoró en dirección: DA t+1 0.547 → **0.561** (efecto de normalización + restauración del mejor checkpoint). DA t+5 = 0.565 con el nuevo target acumulado (el 0.546 histórico medía otra cosa: retorno puntual del día t+5).
+- Test t+1: RMSE 1.0969% → 1.1073% (≈ sin cambio, dentro del ruido); DA/Sharpe/MaxDD idénticos (0.586 / 1.203 / -13.85%).
+- RMSE t+5 no comparable con el histórico (cambió la definición de `y_t5`). El equivalente diario t+5 (**1.0949%**) es ahora **mejor que t+1**, y su DA (**0.595**) es la más alta del sistema: el horizonte de 5 días es la señal más fuerte — buen argumento central para la tesis.
+
+**Sanity check pendiente (2 min, DagsHub MLflow):** DA/Sharpe/MaxDD de test idénticos a la corrida vieja con RMSE distinto solo es consistente si el patrón de signos de las 365 predicciones no cambió en ningún día (misma dirección → misma equity curve). Es posible (solo cambió la magnitud), pero conviene confirmar que `test_da_t1`/`test_sharpe_t1` provienen del run nuevo y que este loguea `hybrid_best_scaler.joblib` como artefacto.
+
+**Nota sobre el target RMSE < 0.8% (para discutir con Sonia):** el RMSE de un pronóstico ingenuo (predecir siempre retorno 0) equivale a la desviación estándar de los retornos del período — del orden de 1.1–1.2% diaria en el test (la fila "Naive" de la tabla del notebook tiene el número exacto; recuperarla del run). El modelo (1.1073%) ya está pegado a ese techo. Llegar a 0.8% implicaría R²_OOS ≈ 0.5 sobre retornos diarios, muy por encima de lo publicado en la literatura (R²_OOS del 1–5% ya se consideran económicamente significativos). Recomendación: reformular el target como mejora relativa al baseline ingenuo/Ridge (p. ej. ≥ 5–10% de reducción de RMSE) más targets absolutos en DA y Sharpe (ya cumplidos), o evaluar sobre el equivalente diario t+5 (1.0949%).
+
+---
+
+## Corrida 2026-05-07 (actualización 2) — ⚠ INVALIDADA (pre-correcciones; solo referencia histórica)
 
 **Notebook:** `QQQ_Hibrido_Completo.ipynb` | **Entorno:** Google Colab T4 | **FinBERT:** ceros (sin corpus)
 
@@ -256,12 +290,12 @@ Cubierta en `QQQ_Hibrido_Completo.ipynb` Sección 6:
 
 | Métrica | Baseline | Híbrido (ceros) | Híbrido (FinBERT) | Target |
 |---------|----------|-----------------|-------------------|--------|
-| RMSE t+1 (%) | 1.5 | **1.0969** | esperado < 0.9 | < 0.8 |
+| RMSE t+1 (%) | 1.5 | **1.1073** | esperado < 0.9 | < 0.8 |
 | DA   t+1 | — | **0.586** | esperado > 0.60 | > 0.55 |
 | Sharpe | — | **1.203** ✓ | — | > 0.5 |
 | Max DD (%) | -25 | **-13.85** ✓ | — | > -15 |
 
-*Columna "Híbrido (FinBERT)" se completará en Fase 5.*
+*Columna "Híbrido (FinBERT)" se completará en Fase 5. Valores actualizados con la corrida citable 2026-07-04; nótese que t+5 supera a t+1: RMSE eq. diario 1.0949% y DA 0.595.*
 
 ---
 
@@ -289,8 +323,10 @@ Cubierta en `QQQ_Hibrido_Completo.ipynb` Sección 6:
 ### PASO 1 — ✅ RESUELTO (2026-06-12)
 Son **10 features** (9 indicadores técnicos + VIX_Close). Documentación y comentarios corregidos. Ver sección "Cambios 2026-06-12".
 
-### PASO 1b — Reejecutar `QQQ_Hibrido_Completo.ipynb` en Colab (NUEVO, prioritario)
-Las correcciones del 2026-06-12 (normalización por fold + restauración de mejores pesos) cambian las métricas. Ejecutar el notebook completo en Colab T4 y actualizar la sección "Última Corrida" con los nuevos números antes de citarlos en la tesis.
+### PASO 1b — ✅ RESUELTO (2026-07-04)
+Re-ejecutado en Colab T4. Métricas registradas en "Última Corrida — 2026-07-04":
+Test RMSE t+1 1.1073%, DA 0.586, Sharpe 1.203, MaxDD −13.85%. Las correcciones mejoraron
+la DA de walk-forward (0.547 → 0.561) sin degradar el test.
 
 ### PASO 2 — Construir corpus FinBERT (Fase 4, crítico para RMSE)
 Es la única ruta para bajar RMSE de 1.10% a < 0.8%. Sin esto la tesis no cumple el target principal.
@@ -313,6 +349,34 @@ Es la única ruta para bajar RMSE de 1.10% a < 0.8%. Sin esto la tesis no cumple
    - Sanity check: norma media > 5.0; embedding 2020-03-16 con signo negativo
 
 5. **Reejecutar** `QQQ_Hibrido_Completo.ipynb` con `finbert_embeddings.csv` en su lugar.
+
+### PASO 2b — Mejoras implementables SIN corpus (plan 2026-07-04, en orden valor/esfuerzo)
+
+Mientras se consiguen las credenciales del corpus, estas mejoras fortalecen el capítulo
+de resultados y son implementables ya:
+
+1. **Ensemble de folds en test** (~30 líneas, sin costo extra de entrenamiento): guardar
+   checkpoint y scaler de CADA fold del walk-forward (`hybrid_fold{k}.pth`) y en
+   `cell-test-eval` promediar las predicciones de los 5 modelos (cada uno transformando
+   el test con su propio scaler). Sin leakage: todos entrenan con datos anteriores al test.
+   Reduce varianza y típicamente mejora RMSE/DA vs usar solo el mejor fold. Reportar
+   ambos (mejor fold vs ensemble) en la misma tabla.
+2. **Significancia estadística** (~40 líneas; `statsmodels`/`scipy` ya están):
+   - Test de Pesaran-Timmermann sobre DA (¿0.586 y 0.595 > 0.5 estadísticamente?).
+   - Test de Diebold-Mariano del híbrido vs Naive y vs Ridge (t+1 y t+5).
+   Con n=365 y DA 0.586 debería dar p < 0.01, pero la tesis debe reportarlo formalmente.
+3. **Contextualizar el RMSE vs baseline ingenuo**: extraer del run la fila Naive
+   (≈ σ de retornos del test) y Ridge de la tabla comparativa del notebook, y reportar
+   la mejora % del híbrido. Es el insumo para la discusión del target 0.8% con Sonia.
+4. **Tabla de robustez por régimen** (cierra el pendiente de Fase 6): mapear cada fold
+   del walk-forward a sus fechas de validación (corrección 2018, COVID 2020, bear 2022…)
+   y presentar RMSE/DA por fold junto a su régimen. Explica la brecha WF 1.60% vs test
+   1.11%: los folds tempranos entrenan con menos datos y validan en regímenes más duros
+   que el test 2023-2024 (alcista, baja volatilidad).
+5. **GAN_EPOCHS = 500** (hoy 200 en `config.py`; 1 línea vía `.env` en Colab) — antes de
+   la corrida generativa final. Costo: solo tiempo de GPU.
+6. *(Opcional)* **Ensemble de semillas** para el número final de la tesis: 3–5 seeds del
+   modelo final, reportar media ± std. Números más defendibles en la sustentación.
 
 ### PASO 3 — Ablation study (Fase 5, una vez disponible FinBERT)
 Comparar tres configuraciones para cuantificar el aporte de cada componente:
