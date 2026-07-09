@@ -3,33 +3,47 @@
 ## Estado General: PROTOTIPO FUNCIONAL VALIDADO ✅ — BLOQUEANTE: CORPUS FINBERT
 
 **Fecha de Inicio:** Abril 2026
-**Último Actualizado:** Julio 4, 2026
+**Último Actualizado:** Julio 9, 2026
 
 ---
 
-## ▶ ARRANQUE MAÑANA — indicación única: **"ejecuta el PASO 2b"**
+## ▶ PASO 2b IMPLEMENTADO (2026-07-09) — pendiente: validar en Colab
 
-Con esa sola frase, Claude implementa en este orden (local → commit → push):
+Implementado localmente, verificado (compilación + tests sintéticos de PT/DM) y pusheado.
+Qué cambió:
 
-1. **Ensemble de folds en test**: guardar `hybrid_fold{k}.pth` + scaler de cada fold en el
-   walk-forward (`cell-wf-train`) y en `cell-test-eval` promediar las predicciones de los
-   5 modelos (cada uno con su scaler). Tabla comparativa: mejor fold vs ensemble.
-2. **Significancia estadística** en la evaluación de test: Pesaran-Timmermann sobre DA
-   (t+1 y t+5) + Diebold-Mariano del híbrido vs Naive y vs Ridge.
-3. **Fila Naive/Ridge** citada junto al RMSE del híbrido con mejora % (insumo para la
-   discusión del target 0.8%).
-4. **Tabla fold → régimen**: fechas de validación de cada fold con su RMSE/DA (2018,
-   COVID 2020, bear 2022...).
-5. Documentar `GAN_EPOCHS=500` para la corrida generativa final (vía `.env` en Colab).
+1. **Ensemble de folds en test**: `cell-wf-train` guarda `hybrid_fold{k}.pth` + scaler de
+   cada fold; `cell-test-eval` promedia las predicciones de los 5 modelos (cada uno
+   transformando el test con su propio scaler) y la tabla comparativa reporta mejor fold
+   vs ensemble (t+1 y t+5). Métricas MLflow nuevas con sufijo `_ens`.
+2. **Significancia estadística** (`cell-stat-tests`, celda nueva tras la evaluación):
+   Pesaran-Timmermann sobre la DA + Diebold-Mariano (corrección HLN; para t+5 la varianza
+   de largo plazo usa h−1=4 rezagos por el solapamiento) del híbrido vs Naive y vs Ridge,
+   para mejor fold y ensemble. Funciones nuevas `pesaran_timmermann()` y
+   `diebold_mariano()` en `src/utils.py`, validadas contra cálculo manual independiente.
+3. **Fila Naive/Ridge con mejora %**: `cell-test-eval` imprime σ del test (= RMSE Naive)
+   y la mejora % de RMSE del híbrido vs Naive y vs Ridge (t+1/t+5, mejor fold y ensemble);
+   logueado a MLflow (`improve_pct_vs_naive_t1_ens`, etc.). Tabla completa en
+   `comparativa_test.csv` (artefacto).
+4. **Tabla fold → régimen** (`cell-fold-regime`, celda nueva tras el resumen de folds):
+   fechas de validación por fold con RMSE/DA, σ diaria y retorno del período + etiqueta
+   de régimen; contexto del test para el contraste. `robustez_por_regimen.csv` como
+   artefacto MLflow. Cierra el pendiente de robustez de Fase 6.
+5. **GAN_EPOCHS=500 documentado**: `cell-gan-train` ahora lee `GAN_EPOCHS` del entorno
+   (`%env GAN_EPOCHS=500` antes de la celda); notas en la sección 6 del notebook,
+   `.env.example` y `config.py`.
 
-**Luego tú, en Colab (~40-60 min T4):**
+El resumen final (`cell-summary`) ahora imprime mejor fold vs ensemble, p-values PT/DM y
+mejora % vs baselines — esa es la salida a pegar aquí.
+
+**Tú, en Colab (~40-60 min T4):**
 1. Abrir `QQQ_Hibrido_Completo.ipynb` → ejecutar celda 0 (hace `git pull`).
 2. Run all hasta la Sección 5 incluida (el GAN no hace falta para validar el ensemble).
-3. Pegar aquí la salida del resumen (como hoy).
+3. Pegar aquí la salida del resumen (como la vez pasada).
 
 **Criterio de éxito:** RMSE t+1 ensemble ≤ 1.1073% y DA ≥ 0.586; tests con p < 0.05.
 
-**Pendientes que solo tú puedes destrabar (cuando puedas, no bloquean lo de mañana):**
+**Pendientes que solo tú puedes destrabar (cuando puedas, no bloquean la corrida):**
 - **Corpus FinBERT** (el bloqueante real del RMSE): `kaggle.json` + `TIINGO_API_KEY` →
   `python run_corpus.py` (~3h T4).
 - **Sanity check MLflow (2 min)**: confirmar en DagsHub que `test_da_t1`/`test_sharpe_t1`
@@ -290,7 +304,7 @@ Cubierta en `QQQ_Hibrido_Completo.ipynb` Sección 5:
 - [x] Análisis de exposición con zona de confianza adaptativa (`QQQ_Prototipo_Colab.ipynb` — Sección 6)
 - [x] Diagnóstico de sesgo alcista en clasificador (detectado y documentado)
 - [x] Tabla de sensibilidad de THRESHOLD con métricas completas + recomendación automática (2026-06-12; el valor concreto sale de la próxima corrida)
-- [ ] Robustez a diferentes regímenes de mercado (alcista 2017-2019, caída 2022)
+- [x] Robustez a diferentes regímenes de mercado: tabla fold → régimen en `cell-fold-regime` (2026-07-09; los números salen de la próxima corrida en Colab)
 
 ---
 
@@ -382,33 +396,23 @@ Es la única ruta para bajar RMSE de 1.10% a < 0.8%. Sin esto la tesis no cumple
 
 5. **Reejecutar** `QQQ_Hibrido_Completo.ipynb` con `finbert_embeddings.csv` en su lugar.
 
-### PASO 2b — Mejoras implementables SIN corpus (plan 2026-07-04, en orden valor/esfuerzo)
+### PASO 2b — ✅ IMPLEMENTADO (2026-07-09; pendiente validar con la corrida en Colab)
 
-Mientras se consiguen las credenciales del corpus, estas mejoras fortalecen el capítulo
-de resultados y son implementables ya:
+Los puntos 1-5 quedaron implementados — detalle en la sección "PASO 2b IMPLEMENTADO"
+al inicio de este documento:
 
-1. **Ensemble de folds en test** (~30 líneas, sin costo extra de entrenamiento): guardar
-   checkpoint y scaler de CADA fold del walk-forward (`hybrid_fold{k}.pth`) y en
-   `cell-test-eval` promediar las predicciones de los 5 modelos (cada uno transformando
-   el test con su propio scaler). Sin leakage: todos entrenan con datos anteriores al test.
-   Reduce varianza y típicamente mejora RMSE/DA vs usar solo el mejor fold. Reportar
-   ambos (mejor fold vs ensemble) en la misma tabla.
-2. **Significancia estadística** (~40 líneas; `statsmodels`/`scipy` ya están):
-   - Test de Pesaran-Timmermann sobre DA (¿0.586 y 0.595 > 0.5 estadísticamente?).
-   - Test de Diebold-Mariano del híbrido vs Naive y vs Ridge (t+1 y t+5).
-   Con n=365 y DA 0.586 debería dar p < 0.01, pero la tesis debe reportarlo formalmente.
-3. **Contextualizar el RMSE vs baseline ingenuo**: extraer del run la fila Naive
-   (≈ σ de retornos del test) y Ridge de la tabla comparativa del notebook, y reportar
-   la mejora % del híbrido. Es el insumo para la discusión del target 0.8% con Sonia.
-4. **Tabla de robustez por régimen** (cierra el pendiente de Fase 6): mapear cada fold
-   del walk-forward a sus fechas de validación (corrección 2018, COVID 2020, bear 2022…)
-   y presentar RMSE/DA por fold junto a su régimen. Explica la brecha WF 1.60% vs test
-   1.11%: los folds tempranos entrenan con menos datos y validan en regímenes más duros
-   que el test 2023-2024 (alcista, baja volatilidad).
-5. **GAN_EPOCHS = 500** (hoy 200 en `config.py`; 1 línea vía `.env` en Colab) — antes de
-   la corrida generativa final. Costo: solo tiempo de GPU.
-6. *(Opcional)* **Ensemble de semillas** para el número final de la tesis: 3–5 seeds del
-   modelo final, reportar media ± std. Números más defendibles en la sustentación.
+1. ✅ **Ensemble de folds en test** — checkpoint + scaler por fold; promedio de los 5
+   modelos en test; tabla mejor fold vs ensemble.
+2. ✅ **Significancia estadística** — Pesaran-Timmermann y Diebold-Mariano (HLN) en
+   `src/utils.py` + `cell-stat-tests`; verificados con tests sintéticos locales.
+3. ✅ **RMSE vs baselines con mejora %** — σ del test = RMSE Naive explícito; mejora %
+   vs Naive/Ridge impresa y en MLflow.
+4. ✅ **Tabla de robustez por régimen** — `cell-fold-regime` + `robustez_por_regimen.csv`.
+5. ✅ **GAN_EPOCHS = 500 documentado** — vía entorno en `cell-gan-train`, `.env.example`
+   y `config.py`.
+6. *(Opcional, sigue pendiente)* **Ensemble de semillas** para el número final de la
+   tesis: 3–5 seeds del modelo final, reportar media ± std. Números más defendibles en
+   la sustentación.
 
 ### PASO 3 — Ablation study (Fase 5, una vez disponible FinBERT)
 Comparar tres configuraciones para cuantificar el aporte de cada componente:

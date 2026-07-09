@@ -215,6 +215,122 @@ def predictive_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict:
 
 
 # ============================================================================
+# SIGNIFICANCIA ESTADÍSTICA (Pesaran-Timmermann, Diebold-Mariano)
+# ============================================================================
+
+def pesaran_timmermann(y_true: np.ndarray, y_pred: np.ndarray) -> dict:
+    """
+    Test de Pesaran-Timmermann (1992) de capacidad predictiva direccional.
+
+    H0: los signos de predicción y realización son independientes (el modelo
+    no tiene información direccional). Bajo H0 el estadístico es ~N(0,1).
+    p-value unilateral: P(DA observada > DA esperada bajo independencia).
+
+    Nota: el test asume observaciones independientes. Para el horizonte t+5
+    (retornos acumulados solapados con paso diario) los targets están
+    autocorrelacionados y el p-value es aproximado (tiende a ser optimista).
+
+    Args:
+        y_true: retornos realizados (%)
+        y_pred: retornos predichos (%)
+
+    Returns:
+        dict: da (observada), da_indep (esperada bajo H0), stat, p_value
+    """
+    y = np.asarray(y_true, dtype=float).flatten()
+    x = np.asarray(y_pred, dtype=float).flatten()
+    n = len(y)
+
+    p_hat = float(np.mean(np.sign(x) == np.sign(y)))
+    py = float(np.mean(y > 0))
+    px = float(np.mean(x > 0))
+    p_star = py * px + (1 - py) * (1 - px)
+
+    var_p_hat  = p_star * (1 - p_star) / n
+    var_p_star = (
+        (2 * py - 1) ** 2 * px * (1 - px) / n
+        + (2 * px - 1) ** 2 * py * (1 - py) / n
+        + 4 * py * px * (1 - py) * (1 - px) / n ** 2
+    )
+
+    denom = var_p_hat - var_p_star
+    if denom <= 0:
+        # Degenera cuando las predicciones son casi todas del mismo signo
+        # (var_p_hat ≈ var_p_star): el test no es informativo
+        return {"da": p_hat, "da_indep": p_star, "stat": float("nan"),
+                "p_value": float("nan"), "n": n}
+
+    stat = (p_hat - p_star) / np.sqrt(denom)
+    p_value = float(stats.norm.sf(stat))
+    return {"da": p_hat, "da_indep": p_star, "stat": float(stat),
+            "p_value": p_value, "n": n}
+
+
+def diebold_mariano(
+    y_true: np.ndarray,
+    pred_a: np.ndarray,
+    pred_b: np.ndarray,
+    h: int = 1,
+    loss: str = "mse",
+) -> dict:
+    """
+    Test de Diebold-Mariano (1995) con corrección de muestra pequeña de
+    Harvey-Leybourne-Newbold (1997).
+
+    Compara la pérdida de dos pronósticos: d_t = L(e_a,t) − L(e_b,t).
+    stat < 0 → el modelo A tiene menor pérdida que el B.
+    p-value unilateral (H1: A es mejor que B), contra t de Student (n−1 gl).
+
+    La varianza de largo plazo de d_t usa la ventana rectangular con h−1
+    rezagos del artículo original — necesario para h>1 (pronósticos de
+    horizonte multi-día con errores solapados autocorrelacionados).
+
+    Args:
+        y_true: valores realizados (%)
+        pred_a: pronóstico del modelo A (el que se postula mejor)
+        pred_b: pronóstico del modelo B (benchmark)
+        h     : horizonte de pronóstico (1 para t+1, 5 para t+5)
+        loss  : 'mse' (error cuadrático) o 'mae' (error absoluto)
+
+    Returns:
+        dict: stat (HLN-corregido), p_value (unilateral), mean_d
+    """
+    y = np.asarray(y_true, dtype=float).flatten()
+    e_a = y - np.asarray(pred_a, dtype=float).flatten()
+    e_b = y - np.asarray(pred_b, dtype=float).flatten()
+
+    if loss == "mse":
+        d = e_a ** 2 - e_b ** 2
+    elif loss == "mae":
+        d = np.abs(e_a) - np.abs(e_b)
+    else:
+        raise ValueError(f"loss desconocida: {loss!r} (usar 'mse' o 'mae')")
+
+    n = len(d)
+    d_bar = float(d.mean())
+    d_c = d - d_bar
+
+    lr_var = float(np.mean(d_c ** 2))          # gamma_0
+    for lag in range(1, h):
+        gamma = float(np.mean(d_c[lag:] * d_c[:-lag]))
+        lr_var += 2 * gamma
+    if lr_var <= 0:
+        # La ventana rectangular puede dar varianza negativa; fallback a gamma_0
+        lr_var = float(np.mean(d_c ** 2))
+    if lr_var <= 0:
+        # Pronósticos idénticos (d_t = 0 para todo t): el test no aplica
+        return {"stat": float("nan"), "p_value": float("nan"),
+                "mean_d": d_bar, "n": n}
+
+    dm_stat = d_bar / np.sqrt(lr_var / n)
+    hln = np.sqrt((n + 1 - 2 * h + h * (h - 1) / n) / n)
+    stat = float(hln * dm_stat)
+
+    p_value = float(stats.t.cdf(stat, df=n - 1))   # unilateral: A mejor (stat<0)
+    return {"stat": stat, "p_value": p_value, "mean_d": d_bar, "n": n}
+
+
+# ============================================================================
 # MÉTRICAS GENERATIVAS
 # ============================================================================
 
