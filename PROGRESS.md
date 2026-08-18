@@ -3,7 +3,56 @@
 ## Estado General: PROTOTIPO FUNCIONAL VALIDADO ✅ — BLOQUEANTE: CORPUS FINBERT
 
 **Fecha de Inicio:** Abril 2026
-**Último Actualizado:** Julio 9, 2026
+**Último Actualizado:** Agosto 18, 2026
+
+---
+
+## ▶ BÚSQUEDA DE HIPERPARÁMETROS IMPLEMENTADA (2026-08-18) — lista, pendiente de ejecutar
+
+Cierra el hueco más grande del documento: hasta hoy los ~20 hiperparámetros de
+`config.py` eran valores fijos elegidos a mano, sin ninguna búsqueda detrás.
+
+**Diseño**: walk-forward **anidado**. Por cada fold externo se corre una búsqueda
+bayesiana completa dentro de su propio train (con walk-forward interno de 3 folds), y
+la validación externa nunca participa en la selección. El test OOS queda intocable
+durante toda la búsqueda. Una búsqueda final sobre todo el train+val produce la config
+reportable en `results/best_hparams.json`.
+
+Spec: `docs/superpowers/specs/2026-08-18-busqueda-hiperparametros-design.md`
+Plan: `docs/superpowers/plans/2026-08-18-busqueda-hiperparametros.md`
+
+**Tres decisiones conservadoras**, motivadas por el tamaño muestral (validación externa
+de 138 muestras, interna de 372-537, cifras verificadas con la propia `walk_forward_splits`):
+1. Validación interna de **3 folds** en vez de split simple — duplica las muestras por
+   trial y promedia sobre tres regímenes de mercado.
+2. Espacio de **6 dimensiones**, no 9 (`lr`, `weight_decay`, `hidden_size`, `d_model`,
+   `dropout`, `w_t1`). Fijos: `num_heads=4`, `num_lstm_layers=2`, `batch_size=32`.
+3. **Regla de un error estándar** (Breiman): entre las configs dentro de 1 SE del mejor
+   se elige la más parsimoniosa, en vez del mínimo crudo. Ataca el winner's curse.
+
+**Expectativa realista**: esto NO va a mover el RMSE de forma sustancial. Con
+DM p=0.392 contra Naive, lo que mueve esa aguja es el corpus FinBERT. El valor de este
+módulo es completar el capítulo metodológico; conviene que el documento lo presente así
+y no prometa ganancias de rendimiento.
+
+**Verificación**: 36 tests locales en verde, sin GPU. Incluyen no-contaminación del test
+(sobre las llamadas reales, no solo la construcción de splits), ausencia de look-ahead en
+ambos niveles, la regla de 1-SE, reanudabilidad del estudio tras una interrupción, y el
+contrato entre `best_hparams.json` y la celda del notebook.
+
+**Tú, en Colab (cuando exista el corpus FinBERT):**
+```bash
+pip install optuna==3.6.1
+python run_hpo.py --mode estimate            # mide 1 trial real y extrapola el costo
+python run_hpo.py --mode nested  --trials 40 # estimación insesgada (~15h estimadas)
+python run_hpo.py --mode final   --trials 40 # -> results/best_hparams.json
+```
+La búsqueda es reanudable: si Colab se desconecta, relanzar el mismo comando continúa
+desde donde iba (`results/hpo.db`).
+
+**Por qué esperar al corpus**: hoy la rama de sentimiento recibe ceros, así que los
+óptimos de `d_model`, `dropout` y `w_t1` cambiarán al activar FinBERT. Tunear ahora
+gastaría GPU dos veces. El notebook funciona igual sin `best_hparams.json`.
 
 ---
 
@@ -51,6 +100,42 @@ mejora % vs baselines — esa es la salida a pegar aquí.
 - **Mensaje a Sonia**: proponer reformular el target RMSE < 0.8% como mejora relativa al
   baseline + targets DA/Sharpe (ver nota en "Última Corrida — 2026-07-04").
 **Timeline:** 2-3 meses para completar todas las fases
+
+---
+
+## ▶ Corrida 2026-08-12 — validación de PASO 2b ejecutada — ⚠ NO CITABLE AÚN, en análisis
+
+Primera corrida en Colab del commit `8e0327c` (PASO 2b). Resultados y análisis, pendiente de
+confirmación antes de reemplazar la sección "Última Corrida — 2026-07-04" como referencia oficial.
+
+**Números:**
+- WF: RMSE t+1 1.6026% ± 0.4781% (≈ igual a julio), DA t+1 **0.547** (bajó de 0.561 en julio
+  pese a seed fijo — ver nota de reproducibilidad abajo).
+- Test OOS ensemble t+1: RMSE **1.0945%**, DA 0.586 (mejora sobre mejor-fold 1.1073%/0.586 —
+  cumple el criterio numérico pre-registrado).
+- Test OOS ensemble t+5: RMSE eq. diario 1.0880%, DA 0.595.
+- Sharpe/MaxDD ensemble = mejor fold (1.203 / -13.85%) — mismo patrón direccional de señales.
+
+**Hallazgo 1 — mejora vs Naive NO es estadísticamente significativa:** Diebold-Mariano ensemble
+t+1 vs Naive p=0.392 (n.s.); vs Ridge p=2.78e-04 (sí). La mejora de RMSE vs Naive es de solo
++0.21% relativo. Confirma con rigor estadístico que, sin FinBERT, el modelo no le gana al azar
+de forma sólida — refuerza la prioridad del corpus.
+
+**Hallazgo 2 — Pesaran-Timmermann da NaN en las 4 combinaciones (mejor fold/ensemble × t1/t5):**
+Causa diagnosticada en `src/utils.py:256-261` — el test degenera cuando las predicciones son
+casi todas del mismo signo. Sugiere sesgo direccional del modelo (coherente con el sesgo alcista
+ya documentado en el clasificador del póster). **Pendiente**: confirmar con el diagnóstico
+"Pred > 0 / Pred < 0" que ya imprime `cell-backtest` (celda 21) en el output completo de Colab.
+
+**Hallazgo 3 — nota de reproducibilidad:** `cell-imports` fija SEED=42 + cudnn determinista;
+por eso el mejor-fold de esta corrida reproduce exacto julio (no es caché ni bug — verificado).
+El leve movimiento del WF DA con RMSE casi idéntico es consistente con no-determinismo conocido
+de kernels LSTM en GPU no cubiertos al 100% por `cudnn.deterministic` — DA (métrica de signo) es
+más sensible a esto que RMSE. Documentar como limitación de reproducibilidad en la metodología.
+
+**Pendiente antes de citar esta corrida:** confirmar Hallazgo 2, decidir si corregir
+`pesaran_timmermann()` o documentarlo como limitación, y decidir si esta corrida reemplaza a la
+de 2026-07-04 como referencia oficial.
 
 ---
 
