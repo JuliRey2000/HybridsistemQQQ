@@ -81,3 +81,95 @@ def test_build_inner_folds_respeta_indices_no_contiguos():
         assert f.train_idx.min() >= 100
         assert f.val_idx.max()   < 300
         assert f.train_idx.max() < f.val_idx.min()
+
+
+# ============================================================================
+# ESPACIO DE BÚSQUEDA
+# ============================================================================
+
+from hpo_core import (
+    FIXED_HPARAMS, SEARCH_SPACE,
+    complete_hparams, suggest_hparams, validate_hparams,
+)
+
+
+class FakeTrial:
+    """Sustituto de optuna.Trial para probar el muestreo sin instalar optuna."""
+
+    def __init__(self, valores: dict):
+        self.valores = valores
+        self.pedidos: list[str] = []
+
+    def suggest_float(self, name, low, high, log=False):
+        self.pedidos.append(name)
+        assert low <= self.valores[name] <= high, f"{name} fuera de rango"
+        return self.valores[name]
+
+    def suggest_categorical(self, name, choices):
+        self.pedidos.append(name)
+        assert self.valores[name] in choices, f"{name} fuera del conjunto"
+        return self.valores[name]
+
+
+VALORES_OK = {
+    "lr": 1e-3, "weight_decay": 1e-5, "hidden_size": 128,
+    "d_model": 64, "dropout": 0.2, "w_t1": 0.6,
+}
+
+
+def test_el_espacio_tiene_exactamente_seis_dimensiones():
+    assert len(SEARCH_SPACE) == 6
+    assert set(SEARCH_SPACE) == {
+        "lr", "weight_decay", "hidden_size", "d_model", "dropout", "w_t1"
+    }
+
+
+def test_los_fijos_son_los_del_spec():
+    assert FIXED_HPARAMS == {"num_heads": 4, "num_lstm_layers": 2, "batch_size": 32}
+
+
+def test_suggest_consulta_las_seis_dimensiones():
+    trial = FakeTrial(VALORES_OK)
+    hp = suggest_hparams(trial)
+    assert set(trial.pedidos) == set(SEARCH_SPACE)
+    assert hp["hidden_size"] == 128
+
+
+def test_w_t5_es_el_complemento_de_w_t1():
+    hp = complete_hparams({**VALORES_OK})
+    assert hp["w_t1"] + hp["w_t5"] == pytest.approx(1.0)
+
+
+def test_los_fijos_se_incorporan_a_la_config():
+    hp = complete_hparams({**VALORES_OK})
+    for k, v in FIXED_HPARAMS.items():
+        assert hp[k] == v
+
+
+def test_toda_combinacion_categorica_del_espacio_es_valida():
+    """num_heads=4 fijo hace que 32, 64 y 128 sean siempre divisibles."""
+    for hidden in SEARCH_SPACE["hidden_size"][1]:
+        for d_model in SEARCH_SPACE["d_model"][1]:
+            hp = complete_hparams({**VALORES_OK, "hidden_size": hidden, "d_model": d_model})
+            validate_hparams(hp)   # no debe lanzar
+
+
+def test_validate_rechaza_d_model_no_divisible():
+    hp = complete_hparams({**VALORES_OK})
+    hp["d_model"] = 33
+    with pytest.raises(ValueError, match="divisible"):
+        validate_hparams(hp)
+
+
+def test_validate_rechaza_pesos_que_no_suman_uno():
+    hp = complete_hparams({**VALORES_OK})
+    hp["w_t5"] = 0.9
+    with pytest.raises(ValueError, match="suman"):
+        validate_hparams(hp)
+
+
+def test_validate_rechaza_dropout_fuera_de_rango():
+    hp = complete_hparams({**VALORES_OK})
+    hp["dropout"] = 1.5
+    with pytest.raises(ValueError, match="dropout"):
+        validate_hparams(hp)

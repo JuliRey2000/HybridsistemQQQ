@@ -86,3 +86,80 @@ def build_nested_splits(
         )
         for k, (tr, va) in enumerate(externos)
     )
+
+
+# ============================================================================
+# ESPACIO DE BÚSQUEDA
+# ============================================================================
+
+# Fijos por decisión de diseño (ver spec, "Valores fijos y su justificación").
+# num_heads=4 elimina de raíz la restricción de divisibilidad: 32, 64 y 128 son
+# todos divisibles por 4, así que ninguna combinación del espacio es inválida.
+FIXED_HPARAMS: dict = {
+    "num_heads":       4,
+    "num_lstm_layers": 2,
+    "batch_size":      32,
+}
+
+# Seis dimensiones. Cada dimensión adicional es otra oportunidad de ajustar
+# ruido, y con 138-537 muestras de validación el margen es estrecho.
+SEARCH_SPACE: dict[str, tuple] = {
+    "lr":           ("loguniform",  1e-4, 5e-3),
+    "weight_decay": ("loguniform",  1e-6, 1e-3),
+    "hidden_size":  ("categorical", (64, 128, 256)),
+    "d_model":      ("categorical", (32, 64, 128)),
+    "dropout":      ("uniform",     0.1, 0.5),
+    "w_t1":         ("uniform",     0.3, 0.8),
+}
+
+
+def complete_hparams(hp: dict) -> dict:
+    """Añade los hiperparámetros fijos y deriva w_t5 como complemento de w_t1."""
+    completo = dict(FIXED_HPARAMS)
+    completo.update(hp)
+    completo["w_t5"] = 1.0 - completo["w_t1"]
+    return completo
+
+
+def suggest_hparams(trial) -> dict:
+    """
+    Muestrea una configuración del espacio usando un trial de Optuna.
+
+    Acepta cualquier objeto con `suggest_float` y `suggest_categorical`, lo que
+    permite probarlo sin optuna instalado.
+    """
+    hp: dict = {}
+    for nombre, spec in SEARCH_SPACE.items():
+        tipo = spec[0]
+        if tipo == "loguniform":
+            hp[nombre] = trial.suggest_float(nombre, spec[1], spec[2], log=True)
+        elif tipo == "uniform":
+            hp[nombre] = trial.suggest_float(nombre, spec[1], spec[2])
+        elif tipo == "categorical":
+            hp[nombre] = trial.suggest_categorical(nombre, list(spec[1]))
+        else:
+            raise ValueError(f"Tipo de distribución desconocido: {tipo}")
+    return complete_hparams(hp)
+
+
+def validate_hparams(hp: dict) -> None:
+    """
+    Verifica que una configuración es instanciable y coherente.
+
+    Lanza ValueError con un mensaje explícito en vez de dejar que el fallo
+    aparezca a mitad del entrenamiento.
+    """
+    if hp["d_model"] % hp["num_heads"] != 0:
+        raise ValueError(
+            f"d_model={hp['d_model']} no es divisible por num_heads={hp['num_heads']}"
+        )
+    if abs(hp["w_t1"] + hp["w_t5"] - 1.0) > 1e-9:
+        raise ValueError(
+            f"w_t1={hp['w_t1']} y w_t5={hp['w_t5']} no suman 1.0"
+        )
+    if not 0.0 <= hp["dropout"] < 1.0:
+        raise ValueError(f"dropout={hp['dropout']} fuera del rango [0, 1)")
+    if hp["lr"] <= 0:
+        raise ValueError(f"lr={hp['lr']} debe ser positivo")
+    if hp["hidden_size"] <= 0 or hp["d_model"] <= 0:
+        raise ValueError("hidden_size y d_model deben ser positivos")
