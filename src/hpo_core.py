@@ -163,3 +163,58 @@ def validate_hparams(hp: dict) -> None:
         raise ValueError(f"lr={hp['lr']} debe ser positivo")
     if hp["hidden_size"] <= 0 or hp["d_model"] <= 0:
         raise ValueError("hidden_size y d_model deben ser positivos")
+
+
+# ============================================================================
+# SELECCIÓN: REGLA DE UN ERROR ESTÁNDAR
+# ============================================================================
+
+@dataclass(frozen=True)
+class TrialRecord:
+    """Resultado de un trial: su configuración y el val_loss de cada fold interno."""
+    params: dict
+    fold_losses: tuple[float, ...]
+
+    @property
+    def mean_loss(self) -> float:
+        return float(np.mean(self.fold_losses))
+
+    @property
+    def se(self) -> float:
+        """Error estándar de la media entre folds. Cero si hay menos de dos."""
+        if len(self.fold_losses) < 2:
+            return 0.0
+        return float(np.std(self.fold_losses, ddof=1) / np.sqrt(len(self.fold_losses)))
+
+
+def _parsimony_key(record: TrialRecord) -> tuple:
+    """
+    Orden de parsimonia del spec: menor hidden_size, menor d_model,
+    mayor dropout, mayor weight_decay. Los dos últimos van negados porque
+    la selección toma el mínimo.
+    """
+    p = record.params
+    return (p["hidden_size"], p["d_model"], -p["dropout"], -p["weight_decay"])
+
+
+def select_one_se(records: list[TrialRecord]) -> TrialRecord:
+    """
+    Elige la configuración final con la regla de un error estándar (Breiman).
+
+    En vez de tomar el mínimo crudo de val_loss —que sobre 138-537 muestras es
+    en buena parte ruido, y quedarse con el mejor de N trials equivale a tomar
+    el máximo de N estimaciones ruidosas— se consideran todas las configuraciones
+    dentro de un error estándar del mejor y se elige la más parsimoniosa.
+
+    Es la práctica establecida en CART y lasso, y ataca el winner's curse
+    directamente.
+    """
+    validos = [r for r in records if np.isfinite(r.mean_loss)]
+    if not validos:
+        raise ValueError("No hay ningún trial válido entre los resultados")
+
+    mejor = min(validos, key=lambda r: r.mean_loss)
+    umbral = mejor.mean_loss + mejor.se
+
+    candidatos = [r for r in validos if r.mean_loss <= umbral]
+    return min(candidatos, key=_parsimony_key)

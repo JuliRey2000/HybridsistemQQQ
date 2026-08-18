@@ -173,3 +173,72 @@ def test_validate_rechaza_dropout_fuera_de_rango():
     hp["dropout"] = 1.5
     with pytest.raises(ValueError, match="dropout"):
         validate_hparams(hp)
+
+
+# ============================================================================
+# REGLA DE UN ERROR ESTÁNDAR
+# ============================================================================
+
+from hpo_core import TrialRecord, select_one_se
+
+
+def _rec(mean, hidden=128, d_model=64, dropout=0.2, wd=1e-5, spread=0.0):
+    """TrialRecord con 3 folds cuya media es `mean` y dispersión controlada."""
+    losses = (mean - spread, mean, mean + spread)
+    params = complete_hparams({
+        **VALORES_OK, "hidden_size": hidden, "d_model": d_model,
+        "dropout": dropout, "weight_decay": wd,
+    })
+    return TrialRecord(params=params, fold_losses=losses)
+
+
+def test_mean_loss_y_se_se_calculan_sobre_los_folds():
+    r = _rec(1.0, spread=0.1)
+    assert r.mean_loss == pytest.approx(1.0)
+    assert r.se == pytest.approx(np.std([0.9, 1.0, 1.1], ddof=1) / np.sqrt(3))
+
+
+def test_se_es_cero_con_un_solo_fold():
+    r = TrialRecord(params=complete_hparams(VALORES_OK), fold_losses=(1.0,))
+    assert r.se == 0.0
+
+
+def test_elige_el_mejor_si_nadie_mas_entra_en_el_margen():
+    peor  = _rec(2.0, hidden=64,  spread=0.01)
+    mejor = _rec(1.0, hidden=256, spread=0.01)
+    assert select_one_se([peor, mejor]) is mejor
+
+
+def test_prefiere_la_config_mas_simple_dentro_de_un_error_estandar():
+    """El corazón de la regla: dentro del margen gana la parsimonia."""
+    mejor_crudo = _rec(1.00, hidden=256, spread=0.30)   # SE grande -> margen ancho
+    mas_simple  = _rec(1.05, hidden=64,  spread=0.30)
+    elegido = select_one_se([mejor_crudo, mas_simple])
+    assert elegido is mas_simple
+    assert elegido.params["hidden_size"] == 64
+
+
+def test_desempata_por_d_model_cuando_hidden_size_empata():
+    a = _rec(1.00, hidden=128, d_model=128, spread=0.30)
+    b = _rec(1.02, hidden=128, d_model=32,  spread=0.30)
+    assert select_one_se([a, b]) is b
+
+
+def test_desempata_por_mayor_dropout_cuando_la_capacidad_empata():
+    a = _rec(1.00, hidden=128, d_model=64, dropout=0.15, spread=0.30)
+    b = _rec(1.02, hidden=128, d_model=64, dropout=0.45, spread=0.30)
+    assert select_one_se([a, b]) is b
+
+
+def test_ignora_trials_fallidos():
+    fallido = TrialRecord(params=complete_hparams(VALORES_OK),
+                          fold_losses=(float("inf"),) * 3)
+    bueno   = _rec(1.0)
+    assert select_one_se([fallido, bueno]) is bueno
+
+
+def test_lanza_si_no_hay_ningun_trial_valido():
+    fallido = TrialRecord(params=complete_hparams(VALORES_OK),
+                          fold_losses=(float("nan"),) * 3)
+    with pytest.raises(ValueError, match="válido"):
+        select_one_se([fallido])
