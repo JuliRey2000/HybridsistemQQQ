@@ -86,3 +86,126 @@ def records_from_study(study: optuna.Study) -> list[TrialRecord]:
             )
         )
     return records
+
+
+# ============================================================================
+# EVALUACIÓN CON TORCH (requiere GPU; se verifica con el smoke run en Colab)
+# ============================================================================
+
+def evaluate_config(
+    hp: dict,
+    data: dict,
+    inner_folds,
+    device: str,
+    epochs: int = 40,
+    patience: int = 8,
+    trial=None,
+    seed: int = 42,
+) -> list[float]:
+    """
+    Entrena una configuración en cada fold interno y devuelve su val_loss.
+
+    El escalado se ajusta con el train de CADA fold interno, nunca con el
+    conjunto completo: es el punto donde es más fácil filtrar información.
+
+    Si se pasa `trial`, se reporta el resultado tras cada fold para que el
+    pruner pueda abandonar configuraciones malas sin completar los tres — es lo
+    que hace viable el esquema anidado en tiempo de cómputo.
+    """
+    import os
+    import tempfile
+
+    import torch
+
+    from models import HybridPredictiveModel
+    from train import Trainer, make_dataloader
+    from utils import scale_price_sequences
+
+    losses: list[float] = []
+
+    for i, fold in enumerate(inner_folds):
+        torch.manual_seed(seed + i)
+        np.random.seed(seed + i)
+
+        seqs_scaled, _ = scale_price_sequences(data["price_seqs"], fold.train_idx)
+
+        model = HybridPredictiveModel(
+            price_input_size=data["price_seqs"].shape[2],
+            sentiment_dim=data["sentiments"].shape[1],
+            hidden_size=hp["hidden_size"],
+            d_model=hp["d_model"],
+            num_heads=hp["num_heads"],
+            num_lstm_layers=hp["num_lstm_layers"],
+            dropout=hp["dropout"],
+        )
+        trainer = Trainer(
+            model, device=device,
+            lr=hp["lr"], weight_decay=hp["weight_decay"],
+            w_t1=hp["w_t1"], w_t5=hp["w_t5"],
+        )
+
+        train_loader = make_dataloader(
+            seqs_scaled, data["sentiments"], data["y_t1"], data["y_t5"],
+            fold.train_idx, batch_size=hp["batch_size"], shuffle=True,
+        )
+        val_loader = make_dataloader(
+            seqs_scaled, data["sentiments"], data["y_t1"], data["y_t5"],
+            fold.val_idx, batch_size=hp["batch_size"],
+        )
+
+        # Checkpoint temporal: Trainer.fit lo necesita para restaurar los mejores
+        # pesos. Se borra siempre — con cientos de trials, dejarlos acumularía
+        # basura en el disco de Colab.
+        fd, ckpt = tempfile.mkstemp(suffix=".pth")
+        os.close(fd)
+        try:
+            history = trainer.fit(
+                train_loader, val_loader,
+                epochs=epochs, patience=patience, save_path=ckpt,
+            )
+        finally:
+            if os.path.exists(ckpt):
+                os.unlink(ckpt)
+
+        losses.append(float(min(history["val_loss"])))
+
+        del model, trainer
+        if device == "cuda":
+            torch.cuda.empty_cache()
+
+        if trial is not None:
+            trial.report(float(np.mean(losses)), step=i)
+            if trial.should_prune():
+                raise optuna.TrialPruned()
+
+    return losses
+
+
+def estimate_cost(data: dict, outer_folds, device: str, n_trials: int = 40) -> dict:
+    """
+    Cronometra UN trial real con la configuración por defecto y extrapola.
+
+    El spec estima ~15h sin medir; esta función da el número real antes de
+    comprometer horas de GPU.
+    """
+    import time
+
+    hp = complete_hparams({
+        "lr": 1e-3, "weight_decay": 1e-5, "hidden_size": 128,
+        "d_model": 64, "dropout": 0.2, "w_t1": 0.6,
+    })
+
+    t0 = time.time()
+    evaluate_config(hp, data, outer_folds[0].inner, device)
+    seg_por_trial = time.time() - t0
+
+    n_busquedas = len(outer_folds) + 1          # anidado + búsqueda final
+    total_seg = seg_por_trial * n_trials * n_busquedas
+
+    return {
+        "segundos_por_trial": seg_por_trial,
+        "trials_por_busqueda": n_trials,
+        "busquedas": n_busquedas,
+        "horas_totales_sin_pruning": total_seg / 3600,
+        "horas_estimadas_con_pruning": total_seg / 3600 * 0.4,
+    }
