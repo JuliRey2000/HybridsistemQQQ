@@ -209,3 +209,116 @@ def estimate_cost(data: dict, outer_folds, device: str, n_trials: int = 40) -> d
         "horas_totales_sin_pruning": total_seg / 3600,
         "horas_estimadas_con_pruning": total_seg / 3600 * 0.4,
     }
+
+
+# ============================================================================
+# ORQUESTACIÓN
+# ============================================================================
+
+def _buscar_sobre(data, inner_folds, n_trials, study_name, storage, device):
+    """Corre una búsqueda sobre unos folds internos y devuelve la config elegida."""
+    from hpo_core import select_one_se
+
+    def evaluador(hp, trial):
+        return evaluate_config(hp, data, inner_folds, device, trial=trial)
+
+    study = run_search(evaluador, n_trials=n_trials,
+                       study_name=study_name, storage=storage)
+    records = records_from_study(study)
+    elegido = select_one_se(records)
+    return elegido, records
+
+
+def nested_walk_forward(
+    data: dict,
+    test_start: int,
+    n_trials: int,
+    storage: str,
+    device: str,
+    results_dir,
+) -> dict:
+    """
+    Protocolo anidado completo: la estimación insesgada del procedimiento.
+
+    Por cada fold externo corre una búsqueda dentro de su propio train, reentrena
+    la ganadora sobre el train externo completo y la evalúa en la validación
+    externa, que nunca participó en la selección.
+    """
+    import json
+
+    import pandas as pd
+
+    from hpo_core import InnerFold, build_nested_splits
+
+    outer_folds = build_nested_splits(test_start)
+    filas = []
+
+    for outer in outer_folds:
+        logger.info(
+            f"Fold externo {outer.index}: búsqueda sobre {len(outer.inner)} folds internos"
+        )
+        elegido, _ = _buscar_sobre(
+            data, outer.inner, n_trials,
+            study_name=f"nested_outer{outer.index}", storage=storage, device=device,
+        )
+
+        # Reentrenar la ganadora con el presupuesto completo y evaluar fuera.
+        # El fold externo se envuelve como un único InnerFold para reutilizar
+        # evaluate_config sin duplicar el bucle de entrenamiento.
+        fold_externo = (InnerFold(train_idx=outer.train_idx, val_idx=outer.val_idx),)
+        val_loss = evaluate_config(
+            elegido.params, data, fold_externo, device, epochs=100, patience=15,
+        )[0]
+
+        filas.append({"fold": outer.index, "outer_val_loss": val_loss, **elegido.params})
+        logger.info(f"  config elegida -> val_loss externo {val_loss:.6f}")
+
+    df = pd.DataFrame(filas)
+    df.to_csv(results_dir / "hpo_nested.csv", index=False)
+
+    resumen = {
+        "outer_val_loss_media": float(df["outer_val_loss"].mean()),
+        "outer_val_loss_std":   float(df["outer_val_loss"].std()),
+        "folds": filas,
+    }
+    (results_dir / "hpo_nested_resumen.json").write_text(
+        json.dumps(resumen, indent=2), encoding="utf-8"
+    )
+    return resumen
+
+
+def final_search(
+    data: dict,
+    test_start: int,
+    n_trials: int,
+    storage: str,
+    device: str,
+    results_dir,
+) -> dict:
+    """
+    Búsqueda final sobre todo el train+val. Produce la config reportable.
+
+    Los folds internos se construyen sobre el rango 0..test_start completo, que
+    es el mayor conjunto disponible sin tocar el test.
+    """
+    import json
+
+    import pandas as pd
+
+    from hpo_core import build_inner_folds
+
+    inner = build_inner_folds(np.arange(0, test_start))
+    elegido, records = _buscar_sobre(
+        data, inner, n_trials,
+        study_name="final", storage=storage, device=device,
+    )
+
+    pd.DataFrame([
+        {"mean_val_loss": r.mean_loss, "se": r.se, **r.params} for r in records
+    ]).to_csv(results_dir / "hpo_trials.csv", index=False)
+
+    (results_dir / "best_hparams.json").write_text(
+        json.dumps(elegido.params, indent=2), encoding="utf-8"
+    )
+    logger.info(f"Config final guardada en {results_dir / 'best_hparams.json'}")
+    return elegido.params
