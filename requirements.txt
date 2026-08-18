@@ -30,6 +30,12 @@ python-dotenv==1.0.0
 tqdm==4.66.1
 requests==2.31.0
 
+# Búsqueda de hiperparámetros
+optuna==3.6.1
+
+# Testing
+pytest==8.2.0
+
 # Dev / Notebooks
 jupyter==1.0.0
 ipython==8.17.2
