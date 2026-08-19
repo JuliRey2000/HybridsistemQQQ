@@ -7,6 +7,70 @@
 
 ---
 
+## ▶ CAMBIO DE ALCANCE (2026-08-18): el estudio pasa a 2015-2023
+
+**Decisión tomada tras dos hallazgos de la primera ejecución real del corpus.**
+
+**Hallazgo 1 — el archivo de FNSPID elegido se cortaba en 2020.** La primera
+corrida descargó `All_external.csv` (5.7 GB) y reportó cobertura
+`2015-01-01 → 2020-06-11`: faltaban 3.5 años. Al elegirlo se verificó su esquema
+pero no su rango de fechas. Corregido: ahora se usa `nasdaq_exteral_data.csv`
+(23.2 GB, cobertura 2003-2023 verificada muestreando siete puntos), leyendo
+**únicamente el titular**, con lo que la decisión metodológica original
+(titulares, no artículos completos) se mantiene. Se añadió un guard que avisa si
+los datos no alcanzan el final del período.
+
+**Hallazgo 2 — Tiingo requiere plan de pago.** Los 12 meses de 2024 devolvieron
+`403 Forbidden`: el token es válido, pero la API de noticias no está en el plan
+gratuito. Ante la alternativa de pagar (~$10/mes) o acotar el estudio, se acotó.
+
+**Por qué acotar es la mejor opción, no solo la barata:** deja el corpus
+**homogéneo**, una sola fuente de titulares para todo el período. Elimina el
+riesgo de mezclar titulares de FNSPID (train) con título+descripción de Tiingo
+(2024, ventana de test), que habría hecho que el embedding de FinBERT cambiara de
+naturaleza **dentro de la ventana de evaluación**.
+
+**Coste:** ~250 muestras de 2433. La ventana de test queda dentro de 2022-2023,
+cubierta al 100% por FNSPID.
+
+**Pendiente con Sonia:** el documento dice 2015-2024. El cambio es defendible
+("el corpus cubre hasta 2023 y una sola fuente evita heterogeneidad en la ventana
+de evaluación") pero debe conocerlo.
+
+**Importante:** todas las métricas citables actuales quedarán obsoletas tras la
+próxima corrida — cambian los datos (menos período) y el sentimiento (real en vez
+de ceros). La tabla de resultados de la tesis se rehace entera.
+
+---
+
+## ▶ Hallazgos de la corrida 2026-08-18 (previa a los arreglos)
+
+**El "mejor fold" no es reproducible.** Mismo commit y misma semilla que el
+12-ago, y sin embargo:
+
+| Métrica | 12-ago | 18-ago |
+|---|---|---|
+| Mejor fold — Sharpe | **1.203** | **−0.392** |
+| Mejor fold — DA t+1 | 0.586 | 0.501 |
+| Ensemble — Sharpe | 1.203 | 1.203 |
+| Ensemble — DA t+1 | 0.586 | 0.586 |
+
+El ensemble es estable; el mejor fold oscila entre Sharpe +1.203 y −0.392. Como
+las "métricas citables" oficiales son de mejor fold, **conviene que la tesis cite
+el ensemble**.
+
+**El PT en NaN queda explicado.** Los folds individuales sí dan p-valor
+(t+1 p=0.663, t+5 p=3.6e-03); solo el ensemble da NaN. La degeneración la **crea
+el promediado**: al promediar 5 modelos las predicciones se encogen hacia la
+media y salen casi todas del mismo signo. No es un sesgo alcista del modelo, y se
+explica en una frase en la metodología.
+
+**Bug corregido en el resumen.** El bloque "Targets de la tesis (evaluados sobre
+el ensemble)" evaluaba Sharpe y MaxDD sobre el **mejor fold**. Reportaba
+`Sharpe → ✗ (−0.392)` cuando el ensemble daba **1.203, que sí cumple**.
+
+---
+
 ## ▶ BÚSQUEDA DE HIPERPARÁMETROS IMPLEMENTADA (2026-08-18) — lista, pendiente de ejecutar
 
 Cierra el hueco más grande del documento: hasta hoy los ~20 hiperparámetros de
