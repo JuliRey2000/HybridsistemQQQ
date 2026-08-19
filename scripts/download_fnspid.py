@@ -7,14 +7,23 @@ principal del corpus de noticias 2015-2023.
 Fuente oficial de los autores, sin login ni token:
   https://huggingface.co/datasets/Zihan1004/FNSPID
 
-Se usa `Stock_news/All_external.csv` (5.7 GB, solo titulares). El repo ofrece
-también `Stock_news/nasdaq_exteral_data.csv` (23.2 GB) con el cuerpo completo
-del artículo, pero se descartó a propósito: Tiingo — la fuente de 2024 — solo
-entrega titular + descripción corta, y 2024 es justamente la ventana de test
-out-of-sample. Mezclar artículos completos (train) con titulares (test) haría
-que el embedding de FinBERT cambie de naturaleza dentro del test. Además el
-cuerpo se truncaría a 512 tokens, subiendo el cómputo de ~3h a varios días.
-Override con la variable de entorno FNSPID_URL si se quiere reevaluar.
+Se usa `Stock_news/nasdaq_exteral_data.csv` (23.2 GB) leyendo ÚNICAMENTE el
+titular, nunca el cuerpo del artículo.
+
+Por qué este archivo y no `All_external.csv` (5.7 GB): se probó primero el
+segundo por ser cuatro veces menor, pero **solo llega hasta 2020-06-11**. Eso
+dejaba un hueco de tres años y medio (2020-06 a 2023-12) justo antes de la
+ventana de test. El archivo grande cubre de 2003 a 2023-12 (verificado
+muestreando siete puntos del archivo).
+
+Por qué solo el titular: Tiingo — la fuente de 2024 — entrega titular +
+descripción corta. Mezclar artículos completos en train con textos cortos en
+test haría que el embedding de FinBERT cambie de naturaleza dentro de la ventana
+de evaluación. Además el cuerpo se truncaría a 512 tokens, subiendo el cómputo
+de FinBERT de ~3h a varios días.
+
+Overrides por variable de entorno: FNSPID_URL para cambiar de archivo,
+FNSPID_USE_BODY=1 para incorporar el cuerpo (cambia la metodología, ver arriba).
 
 El archivo es demasiado grande para pd.read_csv() en Colab (12.7 GB de RAM),
 así que se descarga en streaming y se filtra por chunks: el CSV crudo nunca se
@@ -50,11 +59,15 @@ logger = logging.getLogger(__name__)
 
 # ── Fuente ─────────────────────────────────────────────────────────────────────
 HF_REPO     = "Zihan1004/FNSPID"
-HF_FILE     = "Stock_news/All_external.csv"        # 5.7 GB — solo titulares
+HF_FILE     = "Stock_news/nasdaq_exteral_data.csv"   # 23.2 GB, cobertura 2003-2023
 DEFAULT_URL = f"https://huggingface.co/datasets/{HF_REPO}/resolve/main/{HF_FILE}"
 
 FNSPID_URL  = os.getenv("FNSPID_URL", DEFAULT_URL)
 OUTPUT_CSV  = DATA_RAW_PATH / "fnspid_news.csv"
+
+# Solo titulares. Incorporar el cuerpo cambia la metodología (ver docstring) y
+# multiplica por decenas el cómputo de FinBERT, así que es opt-in explícito.
+USE_BODY    = os.getenv("FNSPID_USE_BODY", "0") == "1"
 
 # FNSPID llega hasta 2023; 2024 lo cubre Tiingo (ver download_tiingo.py)
 FNSPID_END  = "2023-12-31"
@@ -104,7 +117,7 @@ def resolve_columns(cols: list[str]) -> tuple[str, str, str | None]:
     """Mapea las columnas del CSV al esquema [date, headline, body]."""
     col_date     = _find_col(cols, DATE_COLS)
     col_headline = _find_col(cols, HEADLINE_COLS)
-    col_body     = _find_col(cols, BODY_COLS)
+    col_body     = _find_col(cols, BODY_COLS) if USE_BODY else None
 
     if col_date is None or col_headline is None:
         raise ValueError(
@@ -115,7 +128,7 @@ def resolve_columns(cols: list[str]) -> tuple[str, str, str | None]:
 
     logger.info(
         f"Mapeando — date: '{col_date}', headline: '{col_headline}', "
-        f"body: '{col_body or 'N/A'}'"
+        f"body: '{col_body or 'omitido (solo titulares)'}'"
     )
     return col_date, col_headline, col_body
 
@@ -282,6 +295,23 @@ def print_report(stats: dict) -> None:
     for year in sorted(stats["by_year"]):
         logger.info(f"    {year}: {stats['by_year'][year]:8,}")
     logger.info(f"{'='*60}")
+
+    # Guard de cobertura. El error más caro de este script es descubrir tarde que
+    # al corpus le faltan años: con All_external.csv los datos se cortaban en
+    # 2020-06 y eso solo se vio DESPUÉS de descargar 5.7 GB y mirar el reporte a
+    # mano. Los días sin noticias acaban con sentimiento forward-filled, que es
+    # justo lo que vacía de contenido a la rama de FinBERT.
+    esperado = pd.Timestamp(FNSPID_END)
+    meses_sin = (esperado - stats["max_date"]).days / 30.44
+    if meses_sin > 3:
+        logger.warning(
+            f"\n⚠️  COBERTURA INCOMPLETA\n"
+            f"    Los datos acaban en {stats['max_date'].date()} pero se esperaban "
+            f"hasta {esperado.date()}.\n"
+            f"    Faltan ~{meses_sin:.0f} meses, que quedarán con sentimiento "
+            f"forward-filled.\n"
+            f"    Revisa si el archivo de origen ({HF_FILE}) cubre el rango completo."
+        )
 
 
 def main() -> int:

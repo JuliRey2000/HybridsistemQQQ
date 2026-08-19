@@ -90,6 +90,20 @@ def fetch_month(api_key: str, start: str, end: str) -> list[dict]:
                     "API key inválida (401 Unauthorized).\n"
                     "Verifica TIINGO_API_KEY en: https://api.tiingo.com/account/api/token"
                 ) from e
+            elif resp.status_code == 403:
+                # 403 != 401: el token es válido, pero la cuenta no tiene acceso
+                # al endpoint de noticias. Abortar de inmediato en vez de repetir
+                # el mismo error doce veces, una por mes.
+                raise PermissionError(
+                    "403 Forbidden: el token es válido pero tu plan de Tiingo no "
+                    "incluye acceso a la API de noticias.\n"
+                    "El endpoint /tiingo/news requiere un plan de pago; el gratuito "
+                    "solo cubre datos de precios.\n"
+                    "Opciones:\n"
+                    "  1. Contratar el plan Basic (~$10/mes) en https://api.tiingo.com/pricing\n"
+                    "  2. Acotar el estudio a 2015-2023 y prescindir de 2024 (FNSPID\n"
+                    "     cubre ese rango completo, sin depender de ninguna API de pago)"
+                ) from e
             elif resp.status_code == 429:
                 logger.warning(f"Rate limit alcanzado. Esperando 60s...")
                 time.sleep(60)
@@ -191,6 +205,11 @@ def main() -> int:
             records = fetch_month(api_key, start, end)
             all_records.extend(records)
             logger.info(f"  ✓ {len(records):5,} noticias")
+        except (PermissionError, EnvironmentError) as e:
+            # Credenciales o plan: reintentar los once meses restantes daría el
+            # mismo error once veces y enterraría el diagnóstico.
+            logger.error(f"\n{e}")
+            return 1
         except Exception as e:
             logger.error(f"  Error en {start}: {e}")
         time.sleep(PAUSE_MONTHLY)
