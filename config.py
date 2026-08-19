@@ -20,8 +20,12 @@ for p in [DATA_RAW_PATH, DATA_PROCESSED_PATH, MODELS_PATH, RESULTS_PATH, LOGS_PA
 
 # ─── DATA PIPELINE ───────────────────────────────────────────────────────────
 TICKER      = os.getenv("TICKER", "QQQ")
-START_DATE  = os.getenv("START_DATE", "2015-01-01")   # tesis: 2015-2024
-END_DATE    = os.getenv("END_DATE",   "2024-12-31")
+START_DATE  = os.getenv("START_DATE", "2015-01-01")   # tesis: 2015-2023
+# El período acaba en 2023 porque es hasta donde llega FNSPID, la fuente del
+# corpus de noticias. Extenderlo a 2024 exigiría una segunda fuente (Tiingo, de
+# pago), lo que además haría heterogéneo el corpus dentro de la ventana de test.
+# Una sola fuente para todo el período es metodológicamente más limpio.
+END_DATE    = os.getenv("END_DATE",   "2023-12-31")
 LOOKBACK    = int(os.getenv("LOOKBACK", "30"))         # ventana deslizante
 HORIZON_T1  = 1                                        # predicción t+1
 HORIZON_T5  = 5                                        # predicción t+5

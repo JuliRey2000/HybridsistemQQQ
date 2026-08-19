@@ -49,7 +49,7 @@ import requests
 from tqdm import tqdm
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from config import DATA_RAW_PATH, START_DATE
+from config import DATA_RAW_PATH, END_DATE, START_DATE
 
 logging.basicConfig(
     level=logging.INFO,
@@ -69,8 +69,10 @@ OUTPUT_CSV  = DATA_RAW_PATH / "fnspid_news.csv"
 # multiplica por decenas el cómputo de FinBERT, así que es opt-in explícito.
 USE_BODY    = os.getenv("FNSPID_USE_BODY", "0") == "1"
 
-# FNSPID llega hasta 2023; 2024 lo cubre Tiingo (ver download_tiingo.py)
-FNSPID_END  = "2023-12-31"
+# FNSPID no llega más allá de 2023. Se recorta al final del período de estudio
+# si este es anterior, para no arrastrar noticias que nadie va a usar.
+FNSPID_COVERAGE_END = "2023-12-31"
+FNSPID_END  = min(END_DATE, FNSPID_COVERAGE_END)
 
 CHUNKSIZE   = 500_000    # filas por chunk — ~200 MB de RAM pico con 3 columnas
 
@@ -344,7 +346,7 @@ def main() -> int:
     print_report(stats)
 
     logger.info(f"\n✅ Guardado: {OUTPUT_CSV}")
-    logger.info("Próximo: python scripts/download_tiingo.py")
+    logger.info("Próximo: python scripts/build_corpus.py")
     return 0
 
 

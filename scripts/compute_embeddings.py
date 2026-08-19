@@ -1,7 +1,7 @@
 """
 Computa embeddings diarios de sentimiento con FinBERT.
 
-Para cada día hábil del mercado (2015-2024):
+Para cada día hábil del mercado (período de config.py, por defecto 2015-2023):
   1. Agrupa todas las noticias del día (headline + body)
   2. Extrae embedding [CLS] con FinBERT para cada noticia
   3. Promedia los embeddings del día → 1 vector de 768 dimensiones

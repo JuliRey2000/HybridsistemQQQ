@@ -2,7 +2,7 @@
 Unifica y limpia el corpus de noticias (FNSPID + Tiingo 2024).
 
 Pasos:
-  1. Recorre fnspid_news.csv + tiingo_2024.csv por chunks
+  1. Recorre fnspid_news.csv (+ tiingo_2024.csv si existe) por chunks
   2. Reparte las filas en buckets temporales por año-mes
   3. Por bucket: deduplica por (date, headline) y ordena cronológicamente
   4. Concatena los buckets en orden → data/interim/corpus_merged.csv
@@ -183,7 +183,7 @@ def main() -> int:
             "No se encontraron fuentes de noticias.\n"
             "Ejecuta primero:\n"
             "  python scripts/download_fnspid.py\n"
-            "  python scripts/download_tiingo.py"
+            "  (tiingo_2024.csv es opcional: solo para extender a 2024)"
         )
         return 1
 
