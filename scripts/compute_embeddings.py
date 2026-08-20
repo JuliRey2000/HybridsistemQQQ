@@ -63,14 +63,15 @@ CORPUS_CSV       = Path(__file__).parent.parent / "data" / "interim" / "corpus_m
 PRICE_DF_CSV     = DATA_PROCESSED_PATH / "price_df.csv"
 OUTPUT_CSV       = DATA_PROCESSED_PATH / "finbert_embeddings.csv"
 CHECKPOINT_DIR   = DATA_PROCESSED_PATH / "emb_checkpoints"
-PARTIAL_CSV      = CHECKPOINT_DIR / "partial_progress.csv"
+PARTIAL_NAME     = "partial_progress.csv"
+FINGERPRINT_NAME = "corpus_fingerprint.txt"
 
 CHECKPOINT_EVERY = 200      # guardar cada N días procesados
 BATCH_CPU        = 32       # noticias por batch en CPU
 BATCH_GPU        = 64       # noticias por batch en GPU T4
 CORPUS_CHUNKSIZE = 200_000  # filas por chunk al recorrer el corpus
 
-ONE_DAY          = pd.Timedelta("1d")
+ONE_DAY          = pd.Timedelta("1D")
 MAX_NEWS_PER_DAY = int(os.getenv("MAX_NEWS_PER_DAY", "0"))
 
 
@@ -190,15 +191,54 @@ class CorpusWindow:
 
 # ── Checkpoint ────────────────────────────────────────────────────────────────
 
-def load_checkpoint() -> dict:
-    """Carga progreso previo desde PARTIAL_CSV (si existe)."""
-    CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
+def corpus_fingerprint(corpus_path: Path) -> str:
+    """
+    Identifica la versión del corpus con tamaño y fecha de modificación.
 
-    if not PARTIAL_CSV.exists():
+    No se hashea el contenido: son gigabytes y esto se consulta al arrancar.
+    Tamaño + mtime distingue de sobra dos corpus distintos, y en la dirección
+    conservadora: reconstruir el corpus siempre cambia el mtime aunque el
+    contenido coincida, así que como mucho se recalcula de más.
+    """
+    st = corpus_path.stat()
+    return f"{st.st_size}:{st.st_mtime_ns}"
+
+
+def load_checkpoint(
+    checkpoint_dir: Path = CHECKPOINT_DIR,
+    corpus_path: Path = CORPUS_CSV,
+) -> dict:
+    """
+    Carga progreso previo, pero SOLO si se calculó sobre este mismo corpus.
+
+    Sin esta comprobación un checkpoint sobrevive al cambio de corpus y el
+    resultado mezcla dos fuentes dentro de la misma serie: los días viejos
+    conservan el embedding del corpus anterior y los nuevos usan el actual.
+    Pasó el 2026-08-18, cuando FNSPID se cambió por el archivo que sí cubre
+    hasta 2023 — y no habría dado ni un error.
+    """
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    partial     = checkpoint_dir / PARTIAL_NAME
+    fingerprint = checkpoint_dir / FINGERPRINT_NAME
+
+    if not partial.exists():
         return {}
 
-    logger.info(f"Reanudando desde checkpoint: {PARTIAL_CSV}")
-    df = pd.read_csv(PARTIAL_CSV, index_col=0, parse_dates=True)
+    guardada = fingerprint.read_text(encoding="utf-8").strip() if fingerprint.exists() else ""
+    actual   = corpus_fingerprint(corpus_path) if corpus_path.exists() else ""
+
+    if not guardada or guardada != actual:
+        logger.warning(
+            f"Checkpoint descartado: se calculó sobre otro corpus "
+            f"(huella '{guardada or 'ausente'}' ≠ '{actual}').\n"
+            f"    Los embeddings se recalculan desde cero sobre {corpus_path.name}."
+        )
+        partial.unlink(missing_ok=True)
+        fingerprint.unlink(missing_ok=True)
+        return {}
+
+    logger.info(f"Reanudando desde checkpoint: {partial}")
+    df = pd.read_csv(partial, index_col=0, parse_dates=True)
     results = {
         str(idx.date()): row.values.astype(np.float32)
         for idx, row in df.iterrows()
@@ -207,15 +247,27 @@ def load_checkpoint() -> dict:
     return results
 
 
-def save_checkpoint(results: dict) -> None:
-    """Guarda progreso parcial en PARTIAL_CSV."""
+def save_checkpoint(
+    results: dict,
+    checkpoint_dir: Path = CHECKPOINT_DIR,
+    corpus_path: Path = CORPUS_CSV,
+) -> None:
+    """Guarda progreso parcial junto a la huella del corpus que lo generó."""
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    partial  = checkpoint_dir / PARTIAL_NAME
     emb_cols = [f"emb_{i}" for i in range(SENTIMENT_DIM)]
 
     df = pd.DataFrame.from_dict(dict(results), orient="index", columns=emb_cols)
     df.index = pd.to_datetime(df.index)
     df.index.name = "date"
-    df.to_csv(PARTIAL_CSV)
-    logger.info(f"Checkpoint guardado: {len(results):,} días → {PARTIAL_CSV.name}")
+    df.to_csv(partial)
+
+    if corpus_path.exists():
+        (checkpoint_dir / FINGERPRINT_NAME).write_text(
+            corpus_fingerprint(corpus_path), encoding="utf-8"
+        )
+
+    logger.info(f"Checkpoint guardado: {len(results):,} días → {partial.name}")
 
 
 # ── Cómputo de embeddings ─────────────────────────────────────────────────────

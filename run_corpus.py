@@ -47,6 +47,10 @@ STEPS = [
         "name"  : "FNSPID download",
         "script": SCRIPTS_DIR / "download_fnspid.py",
         "output": Path(__file__).parent / "data" / "raw" / "fnspid_news.csv",
+        # Se ejecuta siempre, aunque el CSV ya exista: el script comprueba en
+        # segundos que el archivo en disco cubra el período completo. Saltarlo
+        # es lo que dejó pasar el FNSPID que solo llegaba a 2020-06.
+        "always_run": True,
     },
     {
         "name"  : "Tiingo 2024 download",
@@ -83,7 +87,9 @@ def run_step(step: dict) -> bool:
         logger.info(f"[SKIP] {name} — {step.get('skip_msg', 'no aplica')}")
         return True
 
-    if output.exists():
+    # Un paso `always_run` es idempotente por su cuenta y además revalida lo que
+    # encuentre en disco, así que no se salta nunca.
+    if output.exists() and not step.get("always_run"):
         logger.info(f"[SKIP] {name} — output ya existe: {output.name}")
         return True
 

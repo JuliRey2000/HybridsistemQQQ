@@ -74,6 +74,10 @@ USE_BODY    = os.getenv("FNSPID_USE_BODY", "0") == "1"
 FNSPID_COVERAGE_END = "2023-12-31"
 FNSPID_END  = min(END_DATE, FNSPID_COVERAGE_END)
 
+# Margen tolerado entre el final esperado y el último día con noticias. Unos días
+# o semanas sueltas al cierre del período no cambian nada; meses sí.
+MAX_MESES_SIN_COBERTURA = 3
+
 CHUNKSIZE   = 500_000    # filas por chunk — ~200 MB de RAM pico con 3 columnas
 
 
@@ -88,6 +92,10 @@ def _find_col(df_cols: list[str], candidates: set[str]) -> str | None:
         if col.lower().strip() in candidates:
             return col
     return None
+
+
+class CoverageError(RuntimeError):
+    """El archivo de origen no cubre el período de estudio."""
 
 
 class _ProgressReader:
@@ -298,27 +306,74 @@ def print_report(stats: dict) -> None:
         logger.info(f"    {year}: {stats['by_year'][year]:8,}")
     logger.info(f"{'='*60}")
 
-    # Guard de cobertura. El error más caro de este script es descubrir tarde que
-    # al corpus le faltan años: con All_external.csv los datos se cortaban en
-    # 2020-06 y eso solo se vio DESPUÉS de descargar 5.7 GB y mirar el reporte a
-    # mano. Los días sin noticias acaban con sentimiento forward-filled, que es
-    # justo lo que vacía de contenido a la rama de FinBERT.
-    esperado = pd.Timestamp(FNSPID_END)
-    meses_sin = (esperado - stats["max_date"]).days / 30.44
-    if meses_sin > 3:
+
+def check_coverage(max_date: pd.Timestamp) -> None:
+    """
+    Detiene el pipeline si al corpus le faltan meses del período de estudio.
+
+    El error más caro de este script es descubrir tarde que faltan años: con
+    All_external.csv los datos se cortaban en 2020-06 y eso solo se vio DESPUÉS
+    de descargar el archivo y de gastar horas de FinBERT sobre un corpus mutilado.
+    Los días sin noticias acaban con sentimiento forward-filled, que es justo lo
+    que vacía de contenido a la rama de FinBERT — y no produce ningún error.
+
+    Por eso aquí se levanta en vez de avisar: perder 13 minutos de descarga es
+    barato comparado con perder cuatro horas de GPU y una tabla de resultados.
+    FNSPID_ALLOW_SHORT=1 permite seguir a sabiendas.
+    """
+    esperado  = pd.Timestamp(FNSPID_END)
+    meses_sin = (esperado - max_date).days / 30.44
+
+    if meses_sin <= MAX_MESES_SIN_COBERTURA:
+        return
+
+    detalle = (
+        f"COBERTURA INCOMPLETA\n"
+        f"    Los datos acaban en {max_date.date()} pero se esperaban hasta "
+        f"{esperado.date()}.\n"
+        f"    Faltan ~{meses_sin:.0f} meses, que quedarían con sentimiento "
+        f"forward-filled."
+    )
+
+    if os.getenv("FNSPID_ALLOW_SHORT", "0") == "1":
         logger.warning(
-            f"\n⚠️  COBERTURA INCOMPLETA\n"
-            f"    Los datos acaban en {stats['max_date'].date()} pero se esperaban "
-            f"hasta {esperado.date()}.\n"
-            f"    Faltan ~{meses_sin:.0f} meses, que quedarán con sentimiento "
-            f"forward-filled.\n"
-            f"    Revisa si el archivo de origen ({HF_FILE}) cubre el rango completo."
+            f"\n⚠️  {detalle}\n    Se continúa por FNSPID_ALLOW_SHORT=1."
         )
+        return
+
+    raise CoverageError(
+        f"{detalle}\n"
+        f"    Revisa si el archivo de origen ({HF_FILE}) cubre el rango completo.\n"
+        f"    Para continuar de todas formas: FNSPID_ALLOW_SHORT=1"
+    )
+
+
+def existing_max_date(path: Path) -> pd.Timestamp:
+    """Última fecha de un fnspid_news.csv ya descargado."""
+    # No sirve leer la cola del archivo: FNSPID viene agrupado por ticker, así
+    # que las fechas no salen en orden y la última línea no es la más reciente.
+    # Leer solo la columna de fecha cuesta segundos; equivocarse cuesta horas.
+    fechas = pd.read_csv(path, usecols=["date"], low_memory=False)["date"]
+    return pd.to_datetime(fechas, errors="coerce").max()
 
 
 def main() -> int:
     if OUTPUT_CSV.exists():
         logger.info(f"Archivo ya existe: {OUTPUT_CSV}")
+
+        # Revalidar la cobertura del archivo que ya está en disco. Sin esto, un
+        # CSV de una corrida anterior con menos años se da por bueno para
+        # siempre: run_corpus.py lo salta y el error solo se ve en la tabla de
+        # resultados. Es lo que pasó el 2026-08-18.
+        try:
+            check_coverage(existing_max_date(OUTPUT_CSV))
+        except CoverageError as err:
+            logger.error(
+                f"\n❌ El fnspid_news.csv que ya está en disco no sirve.\n{err}\n"
+                f"    Bórralo y vuelve a ejecutar: rm {OUTPUT_CSV}"
+            )
+            return 1
+
         logger.info("Para re-descargar, elimina el archivo y vuelve a ejecutar.")
         return 0
 
@@ -342,8 +397,19 @@ def main() -> int:
         )
         raise
 
-    tmp_path.replace(OUTPUT_CSV)
     print_report(stats)
+
+    # El renombrado va DESPUÉS de la guarda: un archivo corto que quede en su
+    # sitio hace que la próxima ejecución lo dé por bueno y lo salte. Es
+    # exactamente la trampa en la que cayó la corrida del 2026-08-18.
+    try:
+        check_coverage(stats["max_date"])
+    except CoverageError as err:
+        tmp_path.unlink(missing_ok=True)
+        logger.error(f"\n❌ {err}")
+        return 1
+
+    tmp_path.replace(OUTPUT_CSV)
 
     logger.info(f"\n✅ Guardado: {OUTPUT_CSV}")
     logger.info("Próximo: python scripts/build_corpus.py")
