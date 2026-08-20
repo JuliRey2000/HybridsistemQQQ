@@ -3,7 +3,57 @@
 ## Estado General: PROTOTIPO FUNCIONAL VALIDADO ✅ — BLOQUEANTE: CORPUS FINBERT
 
 **Fecha de Inicio:** Abril 2026
-**Último Actualizado:** Agosto 18, 2026
+**Último Actualizado:** Agosto 20, 2026
+
+---
+
+## ▶ GUARDAS DEL CORPUS (2026-08-20) — el runbook de la corrida limpia
+
+Antes de relanzar la corrida se verificó el runbook, y dos agujeros la habrían
+arruinado **sin dar ningún error**:
+
+1. **El checkpoint de embeddings sobrevivía al cambio de corpus.** La lista de
+   borrado no incluía `data/processed/emb_checkpoints/`. `compute_embeddings.py`
+   guarda progreso cada 200 días y lo reanudaba sin comprobar nada: los días ya
+   calculados con el FNSPID viejo (el que se corta en 2020) se habrían
+   conservado, y los nuevos se habrían calculado con el archivo bueno. Dos
+   corpus mezclados dentro de la misma serie — justo la heterogeneidad que
+   motivó acotar el estudio a 2015-2023.
+2. **Un `fnspid_news.csv` corto se daba por bueno para siempre.** Si el archivo
+   viejo sigue en disco, `run_corpus.py` lo salta con `[SKIP] output ya existe`
+   y `download_fnspid.py` ni arranca, así que su guard de cobertura nunca corre.
+   Es el camino exacto que siguió la corrida del 18 de agosto.
+
+**Lo que se cerró:**
+
+- `check_coverage()` levanta `CoverageError` en vez de avisar, y se comprueba
+  **antes** de renombrar el temporal: un archivo corto ya no queda en su sitio.
+  `FNSPID_ALLOW_SHORT=1` permite seguir a sabiendas.
+- Al reutilizar un CSV ya descargado se revalida su última fecha. Para que esa
+  revalidación llegue a correr, el paso de FNSPID va marcado `always_run`.
+- El checkpoint guarda la huella del corpus (tamaño + mtime) que lo generó y se
+  descarta si el corpus cambió, o si no trae huella.
+- 15 tests nuevos en `tests/test_corpus_guards.py` (51 en verde en total).
+
+**Runbook de la corrida limpia (Colab):**
+
+1. Celda 0 (`git pull` + limpia `__pycache__` + credenciales de DagsHub).
+2. Celda 1 — la nueva celda de limpieza: poner `LIMPIAR_ARTEFACTOS = True` y
+   ejecutarla. Borra `fnspid_news.csv*`, `corpus_merged.csv`, `_buckets/`,
+   `*.npy`, `finbert_embeddings.csv`, `price_df.csv` y `emb_checkpoints/`.
+   Volver a ponerla en `False` después: en `True` cada re-ejecución tira horas
+   de FinBERT a la basura.
+3. Resto del notebook en orden. La descarga de FNSPID son ~13 min (23.2 GB) y
+   FinBERT varias horas, reanudable por checkpoints.
+
+**Qué mirar en la salida, en este orden:**
+
+| # | Qué | Dónde | Criterio |
+|---|-----|-------|----------|
+| 1 | Cobertura de FNSPID | `REPORTE FNSPID`, "Rango de fechas" | debe llegar a `2023-12-…`; si no, el pipeline ahora se detiene solo |
+| 2 | Volumen del corpus | `REPORTE CORPUS MERGED` | total de noticias y media/día — decide si hace falta `MAX_NEWS_PER_DAY` |
+| 3 | RMSE con sentimiento real | resumen final | frente a **1.0928%** con ceros: es la comparación que justifica el módulo de sentimiento |
+| 4 | Diebold-Mariano vs Naive | bloque de significancia | ¿baja de **0.257** a algo significativo? |
 
 ---
 
