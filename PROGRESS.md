@@ -1,9 +1,99 @@
 # Progreso del Proyecto
 
-## Estado General: PROTOTIPO FUNCIONAL VALIDADO ✅ — BLOQUEANTE: CORPUS FINBERT
+## Estado General: CORPUS RESUELTO ✅ — RESULTADO NULO DIAGNOSTICADO
 
 **Fecha de Inicio:** Abril 2026
-**Último Actualizado:** Agosto 20, 2026 (corpus descargado)
+**Último Actualizado:** Agosto 20, 2026 (corrida con FinBERT real completada)
+
+---
+
+## ▶ RESULTADO DE LA CORRIDA CON FINBERT REAL (2026-08-20)
+
+**La corrida se completó y el sentimiento estuvo realmente activo**: 2.214 días
+alineados de 2.214, 0 muestras en ceros, 0 días forward-filled. La rama de
+FinBERT recibió datos reales por primera vez en el proyecto.
+
+**No hay mejora demostrable.**
+
+| | Ensemble 5f | Naive (cero) | σ del test |
+|---|---|---|---|
+| RMSE t+1 | 1.3946% | 1.3973% | 1.3934% |
+| RMSE t+5 (eq. diario) | 1.2946% | 1.3085% | — |
+| DM vs Naive t+1 | p = 0.377 | | |
+| DM vs Naive t+5 | p = 0.336 | | |
+
+El Diebold-Mariano contra Naive **empeora**: de 0.257 en la corrida anterior a
+0.377. Se aleja de la significancia, no se acerca.
+
+### El diagnóstico: colapso a la media incondicional
+
+Cuatro observaciones que parecen distintas y son la misma:
+
+1. **RMSE = σ del período** en las seis ventanas (razón 0.998–1.008)
+2. **327 de 327 predicciones positivas** — el signo nunca cambia
+3. **DA = tasa base exacta**: 0.532 observado, 0.532 esperado bajo H0
+4. **Pesaran-Timmermann en `nan`** — su varianza lleva `p̂(1−p̂)` y `p̂ = 1`
+
+Cuantificado: `std(pred)/std(real)` = **0.0250** en t+1 y **0.0155** en t+5. Las
+predicciones se mueven en un rango de 0.14 puntos porcentuales, centradas en
++0.166 (la deriva del activo).
+
+Contabilidad cerrada al cuarto decimal — un modelo que solo emita la constante
+`c = 0.1661`:
+
+```
+MSE = var(y) + (media(y) − c)² = 1.94157 + (0.1047 − 0.1661)² = 1.94534
+RMSE = 1.3948        el ensemble reportó 1.3946
+```
+
+**Toda** la ventaja sobre el naive procede del intercepto. Los 354.530
+parámetros y los 3,46M de titulares no aportan nada medible. Y no queda señal
+residual: Pearson −0.019 (p=0.735), Spearman −0.048 (p=0.383).
+
+### El Sharpe de 1.103 es beta
+
+`Buy & Hold QQQ = 1.103`. Idéntico, con 327 trades y 100% de exposición: con
+todas las predicciones del mismo signo, `sign(pred)` deja la estrategia
+permanentemente larga. El MaxDD de −17.20% es el del propio QQQ. Y al filtrar
+por convicción el rendimiento **empeora** de forma monótona (Sharpe 1.103 →
+0.128, win rate 0.532 → 0.449): los días de mayor convicción del modelo son sus
+peores días.
+
+### ⚠ No reportar los targets como cumplidos
+
+Sharpe (1.103 > 0.5) y MaxDD (−17.20% > −20%) salen ✓, y con la meta de RMSE de
+`CLAUDE.md` (1.5%) pasaría también el RMSE. **Los tres pasarían por motivos
+espurios** y es de lo primero que un tribunal con criterio va a mirar.
+
+Además hay **dos objetivos de RMSE distintos** documentados en el proyecto y
+ninguno en `config.py`:
+
+- el notebook usa `< 0.8%` → exige R²_OOS ≈ 0.67 con σ = 1.39%. Inalcanzable.
+- `CLAUDE.md` dice `< 1.5%` → lo cumple predecir cero (1.3973%). Gratuito.
+
+Como RMSE ≈ σ, un umbral **absoluto** mide la volatilidad del período de
+evaluación, no el acierto. El objetivo debe reformularse relativo al baseline
+ingenuo y acompañado del contraste DM.
+
+### Qué queda, por orden
+
+1. **Ablation** (sentimiento a ceros, mismo período y semilla). Casi seguro que
+   dará lo mismo, pero hay que demostrarlo, no deducirlo. Cierra el hueco #2.
+2. **HPO**, que sigue sin ejecutarse. No arregla un colapso a la media, pero
+   cierra el hueco metodológico #1.
+3. **Reescribir resultados** alrededor del hallazgo real.
+4. **Arreglar el Sharpe de t+5**: `long_short_strategy` compone retornos de 5
+   días solapados con paso diario y `sharpe_ratio` anualiza con √252 sin
+   condiciones. 2.626 × √(1/5) ≈ 1.17, prácticamente el de t+1. Ese 2.63 no
+   puede aparecer en ningún sitio.
+5. **Tres conversaciones con Sonia**, no dos: el período, las métricas que se
+   rehacen, y ahora lo que la tesis afirma.
+
+**Esto no es un trabajo fallido.** Es una hipótesis bien puesta a prueba con un
+corpus construido y verificado, un protocolo sin fuga, contraste estadístico
+serio y un diagnóstico preciso del porqué. Escrito con precisión, es un capítulo
+de resultados sólido — y bastante más honesto que un Sharpe de 2.63 que no
+sobrevive a la primera pregunta.
 
 ---
 

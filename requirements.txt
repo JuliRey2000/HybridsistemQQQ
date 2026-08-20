@@ -12,7 +12,11 @@ yfinance==0.2.32
 ta==0.10.2
 
 # NLP / Sentiment — FinBERT
-transformers==4.35.2
+# Acotado a la serie 4 a propósito: yiyanghkust/finbert-tone solo publica
+# vocab.txt y necesita que transformers construya el tokenizador lento desde el
+# vocabulario. La v5 eliminó esa ruta. El mínimo 4.40 es por Python 3.12, que es
+# lo que corre Colab. Ver tests/test_entorno_notebook.py
+transformers>=4.40,<5
 sentencepiece==0.1.99
 
 # Generative evaluation
