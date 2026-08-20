@@ -30,6 +30,12 @@ from sklearn.preprocessing import StandardScaler
 
 logger = logging.getLogger(__name__)
 
+# Fracción mínima de muestras que deben encontrar su embedding diario. Se espera
+# ~100%: compute_embeddings.py recorre los días de mercado de price_df.csv y hace
+# forward-fill de los que no tienen noticias, así que no debería faltar ninguno.
+# Por debajo de esto no es un hueco, es un desajuste de fechas.
+MIN_COBERTURA_SENTIMIENTO = 0.95
+
 
 # ============================================================================
 # PASO 1 & 2: PRECIOS + RETORNOS
@@ -326,6 +332,7 @@ def create_sequences(
     max_horizon = max(horizon_t1, horizon_t5)
 
     price_seqs, sentiments, y_t1s, y_t5s, dates = [], [], [], [], []
+    n_con_sentimiento = 0
 
     n = len(price_df)
     for i in range(lookback, n - max_horizon):
@@ -338,6 +345,7 @@ def create_sequences(
             day = price_df.index[i]
             if day in sentiment_df.index:
                 sent = sentiment_df.loc[day].values.astype(np.float32)
+                n_con_sentimiento += 1
             else:
                 sent = np.zeros(sentiment_dim, dtype=np.float32)
         else:
@@ -349,6 +357,30 @@ def create_sequences(
         y_t1s.append(price_df["Daily_Return"].iloc[i + horizon_t1])
         y_t5s.append(price_df["Daily_Return"].iloc[i + 1 : i + horizon_t5 + 1].sum())
         dates.append(price_df.index[i])
+
+    # Si se pasaron embeddings, tienen que alinear. Cuando no lo hacen, el bucle
+    # de arriba mete ceros día a día sin quejarse y el modelo entrena como si
+    # fuera solo-precio: la rama de sentimiento —el aporte de la tesis— queda
+    # vacía y nada lo delata. El chequeo del notebook tampoco lo ve, porque solo
+    # mira si existe ALGÚN valor distinto de cero.
+    if sentiment_df is not None:
+        cobertura = n_con_sentimiento / len(sentiments) if sentiments else 0.0
+        logger.info(
+            f"Sentimiento alineado: {n_con_sentimiento}/{len(sentiments)} días "
+            f"({cobertura:.1%})"
+        )
+        if cobertura < MIN_COBERTURA_SENTIMIENTO:
+            raise RuntimeError(
+                f"El sentimiento no alinea con los días de mercado: solo "
+                f"{cobertura:.1%} de las muestras encontraron su embedding "
+                f"(mínimo exigido {MIN_COBERTURA_SENTIMIENTO:.0%}).\n"
+                f"    Días de precio   : {price_df.index[0].date()} → "
+                f"{price_df.index[-1].date()}\n"
+                f"    Días con embedding: {sentiment_df.index[0].date()} → "
+                f"{sentiment_df.index[-1].date()}\n"
+                f"    Suele ser que finbert_embeddings.csv se calculó sobre otro "
+                f"price_df.csv. Regenera ambos."
+            )
 
     return {
         "price_seqs":  np.array(price_seqs,  dtype=np.float32),

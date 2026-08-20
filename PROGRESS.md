@@ -3,7 +3,53 @@
 ## Estado General: PROTOTIPO FUNCIONAL VALIDADO ✅ — BLOQUEANTE: CORPUS FINBERT
 
 **Fecha de Inicio:** Abril 2026
-**Último Actualizado:** Agosto 20, 2026
+**Último Actualizado:** Agosto 20, 2026 (corpus descargado)
+
+---
+
+## ▶ CORPUS DESCARGADO (2026-08-20) — cobertura OK y un hallazgo sobre FNSPID
+
+**Cobertura confirmada**: `2015-01-01 → 2023-12-31`, 3.460.916 titulares
+(15.549.299 filas crudas, 2.510.531 duplicados eliminados). El guard de
+cobertura pasó. La ventana de test cae entera dentro de FNSPID.
+
+**El corpus NO es homogéneo en el tiempo.** 2015 trae ~3.123 titulares/día y
+2021 ~335: una diferencia de 9,3×, y 2015 por sí solo es un tercio del corpus.
+Que 2020 tenga la sexta parte de 2015 descarta que refleje la actividad
+informativa real — es cómo se construyó FNSPID. Tabla completa por año en el
+wiki ([[fnspid]]).
+
+**Por qué importa**: el embedding diario es un promedio, y el error estándar de
+un promedio va con 1/√n. La señal de sentimiento de los primeros años sale ~3×
+más suavizada que la de los últimos, y **la ventana de test (finales de 2022 →
+2023) está en la zona de menor volumen**. Sin corregirlo, el modelo entrena
+sobre sentimiento suave y se evalúa sobre sentimiento ruidoso; si la rama de
+FinBERT no aportara, no se podría distinguir si es que el sentimiento no predice
+o que la variable cambió de naturaleza entre train y test.
+
+**Decisión: `MAX_NEWS_PER_DAY=300`**, el nivel del año más pobre. Deja 2021
+intacto y baja el resto a su altura. No se pierde información que el modelo
+estuviera usando (solo recibe el vector medio, nunca el conteo), el submuestreo
+es reproducible (semilla 42) y de paso reduce el cómputo de FinBERT ~4×.
+Redacción para la tesis: *submuestreo aleatorio con semilla fija a 300
+titulares/día para homogeneizar la precisión del estimador diario de sentimiento
+a lo largo del período*.
+
+**Guard nuevo — alineación del sentimiento.** `create_sequences` emparejaba el
+embedding por fecha exacta y, si no lo encontraba, metía ceros **en silencio**.
+Un desajuste de fechas dejaba la rama de sentimiento vacía sin un solo error, y
+el chequeo del notebook tampoco lo veía (solo mira si existe *algún* valor
+distinto de cero). Ahora exige 95% de cobertura y levanta si no se alcanza.
+5 tests nuevos; 56 en verde.
+
+**Notas menores**: hay titulares en los 3.287 días del calendario, no solo
+hábiles; las noticias de fin de semana se descartan porque `compute_embeddings`
+solo recorre días de mercado y el fallback de ±1 día nunca se activa. Es
+defendible pero hay que declararlo en la metodología.
+
+**El notebook incorpora el arranque en dos tramos** como celda fija (la 9):
+FNSPID y `build_corpus` por separado, antes de la pasada larga de FinBERT, para
+que el volumen del corpus se conozca **antes** de comprometer horas de GPU.
 
 ---
 

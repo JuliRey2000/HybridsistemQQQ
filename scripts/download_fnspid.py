@@ -300,7 +300,7 @@ def print_report(stats: dict) -> None:
     logger.info(f"  Total noticias      : {kept:,}")
     logger.info(f"  Días únicos         : {len(stats['days']):,}")
     logger.info(f"  Rango de fechas     : {stats['min_date'].date()} → {stats['max_date'].date()}")
-    logger.info(f"  Body vacío (%)      : {body_empty_pct:.1f}%  (100% es lo esperado: All_external es solo titulares)")
+    logger.info(f"  Body vacío (%)      : {body_empty_pct:.1f}%  (100% es lo esperado: solo se lee el titular)")
     logger.info("  Noticias por año:")
     for year in sorted(stats["by_year"]):
         logger.info(f"    {year}: {stats['by_year'][year]:8,}")
