@@ -1,5 +1,43 @@
 # Progreso del Proyecto
 
+## Estado General: REPLANTEAMIENTO PROPUESTO — pendiente de aprobacion
+
+**Ultimo Actualizado:** Agosto 20, 2026 (post-mortem y replanteamiento)
+
+### Proximos pasos acordados
+
+1. **Rehacer el corpus** — la VM de Colab murio y se perdieron finbert_embeddings.csv
+   y price_df.csv. ~13 min de descarga + ~25 de FinBERT. **Persistir en Drive.**
+2. **Fase 0, la prueba de puerta**: regresion de |r_t+1| sobre volatilidad pasada
+   mas componentes principales del sentimiento, mirando el R^2 **incremental**.
+   Minutos, sin GPU. Va **antes** que el ablation porque su resultado cambia lo
+   que se le propone a la direccion.
+3. **Ablation** (sentimiento a ceros, mismo periodo y semilla).
+4. **Arreglar** el Sharpe de t+5, el hueco de 126 muestras del walk-forward y la
+   seleccion del mejor fold.
+5. **HPO**, que sigue sin ejecutarse.
+
+### El replanteamiento (2026-08-20)
+
+De predecir el retorno puntual a **caracterizar su distribucion condicional**:
+cabezas de cuantiles con perdida pinball en vez de una salida escalar con error
+cuadratico. Con pinball el minimo es el cuantil condicional, no la media, asi que
+el mecanismo del colapso desaparece. El baseline pasa de "predecir cero" a
+GARCH(1,1). El modulo generativo, hoy huerfano, pasa a estimar el mismo objeto
+que la rama predictiva. Documento completo publicado; ver log.md del vault.
+
+### Analisis de potencia — la leccion metodologica del trabajo
+
+Con n=327 el umbral de significancia es |r| > 0.108, y la banda de efectos
+plausibles segun la literatura (R^2 OOS de 0.5% a 2%) va de 0.071 a 0.141: el
+umbral cae **dentro** de la banda. La potencia para detectar r=0.10 es de ~56%;
+para el 80% harian falta ~617 observaciones. Debio calcularse ANTES de ejecutar.
+
+**Como enunciar la conclusion**: no "el efecto es cero", sino "el efecto no es lo
+bastante grande para ser detectable ni explotable con este diseno".
+
+---
+
 ## Estado General: CORPUS RESUELTO ✅ — RESULTADO NULO DIAGNOSTICADO
 
 **Fecha de Inicio:** Abril 2026
